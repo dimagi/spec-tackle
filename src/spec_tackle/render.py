@@ -262,6 +262,36 @@ def _slugify(text: str, seen: dict[str, int]) -> str:
     return f"{slug}-{count}" if count else slug
 
 
+# -- Claude answers ----------------------------------------------------------
+
+
+def render_answer(text: str) -> str:
+    """Render a Claude answer. It is untrusted (a PR can steer it), so: no raw HTML,
+    images shown as text instead of loaded, links open in a new tab without a referrer."""
+    md = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(["table", "strikethrough"])
+
+    def image(self, tokens, idx, options, env):
+        token = tokens[idx]
+        return escape(f"{token.content} ({token.attrGet('src') or ''})")
+
+    def fence(self, tokens, idx, options, env):
+        token = tokens[idx]
+        lang = (token.info or "").strip().split()[0] if token.info else ""
+        lexer = _lexer_for(lang, is_lang=True) if lang else None
+        code = token.content[:-1] if token.content.endswith("\n") else token.content
+        return f'<pre class="code"><code>{"\n".join(_highlight_lines(code, lexer))}</code></pre>'
+
+    md.add_render_rule("image", image)
+    md.add_render_rule("fence", fence)
+    tokens = md.parse(text)
+    for token in tokens:
+        for child in token.children or []:
+            if child.type == "link_open":
+                child.attrSet("target", "_blank")
+                child.attrSet("rel", "noopener noreferrer")
+    return md.renderer.render(tokens, md.options, {})
+
+
 def outline(html: str) -> list[dict]:
     """Extract (level, id, text, line) for h1–h3 from rendered markdown."""
     pattern = re.compile(

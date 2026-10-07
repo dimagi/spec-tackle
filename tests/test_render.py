@@ -168,3 +168,21 @@ def test_queries_ask_for_markdown_bodies():
     from spec_tackle import github
     assert "body bodyHTML" in github._ACTIVITY_FIELDS
     assert "url body bodyHTML" in github._OVERVIEW_QUERY
+
+
+def test_render_answer_formats_markdown():
+    html = render.render_answer("**Yes**, see `app.py`.\n\n```python\nx = 1\n```")
+    assert "<strong>Yes</strong>" in html and "<code>app.py</code>" in html
+    assert "<pre" in html and "x" in html
+
+
+def test_render_answer_neutralises_html_images_and_js_links():
+    html = render.render_answer(
+        '<img src=x onerror=alert(1)>\n\n![secret](https://evil.example/?leak=1)\n\n'
+        '[click](javascript:alert(1)) [docs](https://example.com)'
+    )
+    assert "<img" not in html
+    assert "&lt;img" in html
+    assert "secret (https://evil.example/?leak=1)" in html
+    assert 'href="javascript' not in html
+    assert '<a href="https://example.com" target="_blank" rel="noopener noreferrer">docs</a>' in html
