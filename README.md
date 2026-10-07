@@ -35,11 +35,19 @@ Opens `http://127.0.0.1:8765`. It authenticates with `GITHUB_TOKEN`/`GH_TOKEN`, 
 - **Live**: the page checks GitHub every 30 seconds. New comments are flagged and announced, and the tab title shows an unread count. You're told when new commits land.
 - **Reviewer tools**: Open/All filter, hide bot comments, open-thread counts per section, `j`/`k` to jump between open threads, and a **Finish review** button (Comment / Approve / Request changes).
 - **Modified specs**: changed blocks get a green marker, with a **Document ↔ Changes** toggle.
+- **Ask Claude (private)**: switch the composer to **Ask Claude**, or select text and press **a**, to ask Claude about a passage. Claude sees the whole PR (description, diffs, every comment) and can read the repo at the PR's commit. Questions and answers stay on your machine and are never posted. Needs [Claude Code](https://claude.com/claude-code) installed and signed in, plus the `claude` extra:
+
+  ```bash
+  uvx --from 'spec-tackle[claude] @ git+https://github.com/dimagi/spec-tackle' spec-tackle
+  ```
 
 ## Development
 
 ```bash
+uv sync --extra claude   # optional, enables Ask Claude
 uv run pytest
 ```
+
+Local state (saved drafts, Ask Claude threads, repo checkouts) lives in `~/.local/share/spec-tackle/`.
 
 FastAPI + Jinja (`src/spec_tackle/app.py`), GitHub GraphQL/REST client (`github.py`), markdown→line-mapped HTML (`render.py`), vanilla JS UI with Tailwind (`static/`).

@@ -87,7 +87,7 @@ As a user without Claude Code, I don't want to see controls that can't work.
 - `claude-agent-sdk` is an **optional extra**, `spec-tackle[claude]`, because the bundled binary makes the install much bigger and people without Claude Code gain nothing from it. The README explains how to run with the extra:
 
   ```bash
-  uvx --from 'spec-tackle[claude] @ git+https://github.com/Charl1996/spec-tackle' spec-tackle
+  uvx --from 'spec-tackle[claude] @ git+https://github.com/dimagi/spec-tackle' spec-tackle
   ```
 
   If the extra isn't installed but `claude` is on PATH, the startup message says to install the extra.
@@ -98,7 +98,7 @@ As a user without Claude Code, I don't want to see controls that can't work.
 
 - Root: `$XDG_DATA_HOME/spec-tackle/repos/`, falling back to `~/.local/share/spec-tackle/repos/`.
 - Bare clone: `repos/{owner}/{repo}.git`. It is created on first use with `git clone --bare --filter=blob:none https://github.com/{owner}/{repo}.git`.
-- Worktree: `repos/{owner}/{repo}/{sha}`. If it is missing:
+- Worktree: `repos/{owner}/{repo}/{sha}`, checked out with `core.symlinks=false`, so committed symlinks become plain files and cannot point outside the worktree. `owner` and `repo` are validated before they are used in paths or URLs. If it is missing:
   1. Run `git worktree prune`.
   2. If the commit isn't in the clone, run `git fetch origin <sha>`.
   3. Run `git worktree add --detach <dir> <sha>`.
@@ -146,15 +146,18 @@ The question's anchor (path, line range, and the text of those lines) goes into 
   - Claude must not suggest edits as if it can make them;
 
   followed by the snapshot.
+- `tools=["Read", "Grep", "Glob"]`: removes every other built-in tool.
 - `allowed_tools=["Read", "Grep", "Glob"]`.
-- `disallowed_tools`: every other built-in tool (Bash, Write, Edit, NotebookEdit, WebFetch, WebSearch, Task).
 - `permission_mode="default"`.
 - `setting_sources=["user"]`.
 - `include_partial_messages=True`.
 - `resume=session_id` when the thread has one.
 - `hooks`: a **PreToolUse** hook that is the actual security boundary. It denies:
   - any tool other than Read, Grep and Glob;
-  - any Read, Grep or Glob whose path (`file_path`, or `path`, or the default cwd) does not resolve, after `os.path.realpath`, to a location inside the worktree.
+  - any path-like input (`file_path`, `path`, `notebook_path`) that does not resolve, after `os.path.realpath`, to a location inside the worktree;
+  - any path starting with `~`;
+  - a Glob `pattern` or Grep `glob` that contains `..`, `~` or `\`, starts an alternative with `/`, uses a character class containing `.`, `/` or `~`, or has a literal prefix that falls outside the search path;
+  - anything else, if the guard itself raises an error (any error inside the guard denies).
 
   Hooks passed in code run whatever `setting_sources` says. A hook is used rather than `can_use_tool`, because `can_use_tool` is not called for tools that `allowed_tools` already approves.
 - **Expired sessions.** Claude Code deletes old session files. If resuming fails because the session is missing, retry once without `resume`, with the thread's earlier messages (from `claude_messages`) placed before the new question in the prompt.
@@ -268,14 +271,13 @@ While an answer streams, the client shows it as plain text. The `done` event car
 
 ## Technical plan
 
-0. **Confirm the SDK assumptions.** Do this before writing feature code, using a throwaway script in the scratchpad. Confirm that:
-   - with `cli_path` set to the user's `claude`, a query works with no `ANTHROPIC_API_KEY`;
-   - the PreToolUse hook is called for auto-approved Read, Grep and Glob calls, and can deny them;
-   - Bash, Write and WebFetch are refused;
-   - `resume` with an unknown session ID fails with an error we can recognise;
-   - partial-message events contain text deltas.
+0. **Confirm the SDK assumptions.** Done, using a throwaway script. Verified with claude-agent-sdk 0.2.164 and Claude Code 2.1.292:
+   - with `cli_path` set to the user's `claude`, a query works with no `ANTHROPIC_API_KEY`, using the CLI's own login;
+   - `tools=[...]` removes the other built-in tools;
+   - PreToolUse hooks run for auto-approved tools and can deny them;
+   - `resume` with an unknown session ID raises `ResultError` with "No conversation found with session ID";
+   - text streams as `content_block_delta` / `text_delta` `StreamEvent`s.
 
-   Update this spec with anything that turns out differently.
 1. **Packaging.** Add the `claude` optional extra to `pyproject.toml`. Make `find_cli()` and the import check set `app.state.claude_cli`, and print the startup message in `__init__.py`. Test with the CLI missing, the extra missing, and the store missing.
 2. **Store migration 2.** Add the two tables, foreign keys, and the thread and message methods. Test in `tests/test_store.py`, including the cascade delete and that removing a recent PR leaves its threads.
 3. **Checkouts.** Write `checkout.py` and `Session.token()`. Add `tests/test_checkout.py`, which uses a local bare repo as `origin` through a URL override. Test:
