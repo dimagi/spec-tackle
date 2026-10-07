@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
@@ -14,9 +15,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from . import render
+from . import claude, claude_api, render
 from .auth import LoginFlow, NotSignedIn, Session
+from .checkout import Checkouts
 from .github import GitHub, GitHubError, PRRef, parse_pr_url
+from .store import Store, StoreError
+from .turns import TurnRunner
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
@@ -25,12 +29,25 @@ templates = Jinja2Templates(directory=HERE / "templates")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.session = Session()
+    try:
+        app.state.store = Store.open()
+    except StoreError as exc:
+        print(f"spec-tackle: {exc}. Ask Claude is off.", file=sys.stderr)
+        app.state.store = None
+    cli = claude.find_cli()
+    app.state.claude_cli = cli if cli and claude.sdk_installed() and app.state.store else None
+    app.state.checkouts = Checkouts()
+    app.state.turns = TurnRunner()
     yield
+    await app.state.turns.aclose()
     await app.state.session.aclose()
+    if app.state.store:
+        app.state.store.close()
 
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+app.include_router(claude_api.router)
 
 
 @app.exception_handler(GitHubError)
@@ -140,6 +157,7 @@ async def review_page(request: Request, owner: str, repo: str, number: int):
                 "pr": {"owner": owner, "repo": repo, "number": number, "url": overview["url"]},
                 "files": client_files,
                 "activity": activity,
+                "claude": bool(request.app.state.claude_cli),
             },
         },
     )

@@ -22,6 +22,13 @@ def main() -> None:
     if not find_token():
         print("spec-tackle: not signed in to GitHub. You can sign in from the page.")
 
+    from .claude import find_cli, sdk_installed
+
+    if not find_cli():
+        print("spec-tackle: Claude Code not found; Ask Claude is off.")
+    elif not sdk_installed():
+        print("spec-tackle: install spec-tackle[claude] to turn on Ask Claude.")
+
     url = f"http://{args.host}:{args.port}/"
     if args.pr:
         try:
