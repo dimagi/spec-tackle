@@ -47,6 +47,8 @@ class TurnRunner:
         def cleanup(task: asyncio.Task) -> None:
             for queue in turn.subscribers:
                 queue.put_nowait(None)
+            if self._turns.get(thread_id) is turn:  # free its events; a newer turn may have replaced it
+                del self._turns[thread_id]
             try:
                 task.result()
             except asyncio.CancelledError:

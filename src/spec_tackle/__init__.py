@@ -39,4 +39,10 @@ def main() -> None:
     print(f"spec-tackle → {url}")
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
-    uvicorn.run("spec_tackle.app:app", host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(
+        "spec_tackle.app:app",
+        host=args.host,
+        port=args.port,
+        log_level="warning",
+        timeout_graceful_shutdown=3,  # open answer streams would otherwise block Ctrl+C
+    )

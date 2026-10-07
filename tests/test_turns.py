@@ -82,8 +82,11 @@ def test_cancel_in_same_tick_cleans_up():
 
 def test_work_exception_cleans_up():
     async def go():
+        gate = asyncio.Event()
+
         async def failing_work(emit):
             emit({"n": 1})
+            await gate.wait()
             raise ValueError("boom")
 
         runner = TurnRunner()
@@ -91,8 +94,22 @@ def test_work_exception_cleans_up():
         await asyncio.sleep(0)
         sub = asyncio.create_task(_drain(runner, "t"))
         await asyncio.sleep(0)
+        gate.set()
         events = await asyncio.wait_for(sub, 1)
         return events, runner.running("t")
 
     events, running = asyncio.run(go())
     assert events == [{"n": 1}] and running is False
+
+
+def test_subscribe_after_turn_finished_yields_nothing():
+    async def go():
+        runner, gate = TurnRunner(), asyncio.Event()
+        gate.set()
+        runner.start(thread_id="t", work=_work(gate, [{"n": 1}, {"type": "done"}]))
+        for _ in range(3):
+            await asyncio.sleep(0)
+        return await _drain(runner, "t"), runner.running("t"), runner._turns
+
+    events, running, turns = asyncio.run(go())
+    assert events == [] and running is False and turns == {}
