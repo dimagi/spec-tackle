@@ -9,9 +9,18 @@
 
 A reviewer-oriented reading view for GitHub pull requests, built for spec and design-doc PRs.
 
+Run it straight from GitHub, no clone needed:
+
+```bash
+uvx --from git+https://github.com/Charl1996/spec-tackle spec-tackle
+```
+
+uv caches the build. Add `--refresh` to pick up new commits, or append `@<tag>` / `@<commit>` to the URL to pin a version.
+
+From a local clone:
+
 ```bash
 uv run spec-tackle https://github.com/dimagi/commcare-connect/pull/1569/changes
-# or start it empty and paste a link:  uv run spec-tackle
 ```
 
 Opens `http://127.0.0.1:8765`. It authenticates with `GITHUB_TOKEN`/`GH_TOKEN`, or falls back to `gh auth token`. If you're not signed in, the page offers **Sign in with GitHub** (via the GitHub CLI) or lets you paste a token.
