@@ -1,6 +1,6 @@
 # Ask Claude
 
-**Status:** Implemented on branch `feat/ask-claude`, in review.
+**Status:** Completed.
 
 ## Goal
 
@@ -17,7 +17,7 @@ Questions and answers are private. They are never sent to GitHub, saved locally,
 | Single answer or conversation | A thread with follow-ups. Claude remembers the earlier messages. |
 | How Claude is called | The Python Agent SDK (`claude-agent-sdk`), run inside the FastAPI process. |
 | Repo on disk | One bare clone per repo, plus one git worktree per commit asked about. |
-| Local storage | The SQLite store from [Recent PRs](recent-prs.md). |
+| Local storage | A local SQLite store (`store.py`). |
 | Which commit a thread uses | The commit the page was rendered at when the thread started. Follow-ups stay on that commit. |
 | Sign-in and model | Whatever the user's own Claude Code install uses: its login or `ANTHROPIC_API_KEY`, and the model set in the user's settings. |
 | When Claude Code is missing | The feature is unavailable and nothing about it is shown. |
@@ -295,7 +295,7 @@ While an answer streams, the client shows it as plain text. The `done` event car
 4. **Context.** Add `body` to the GraphQL fields and to `normalize_activity`. Write `build_context`. Add `tests/test_claude_context.py`: it includes the description, the threads, the conversation and reviews; it drops non-markdown patches over the limit; and it notes when 100 items were reached.
 5. **`ask()` and the path hook.** Write the options, the hook, event mapping, and the expired-session fallback. Unit-test the hook directly: deny `../` paths, absolute paths outside the worktree, symlinks that point outside, and other tools; allow paths inside the worktree.
 6. **TurnRunner.** Write the background task, the event list, subscribers, cancellation on delete, and saving to the store. Test it with a fake `ask()`: a subscriber that joins mid-turn gets the earlier events; two subscribers get the same events; a second start returns a conflict; deleting cancels the turn.
-7. **Routes and answer rendering.** Add the five routes and `render.render_answer`. Add `tests/test_app_claude.py`, using the `conftest.py` fake session from Recent PRs and a fake `ask()`. Test:
+7. **Routes and answer rendering.** Add the five routes and `render.render_answer`. Add `tests/test_app_claude.py`, using the fake session in `tests/conftest.py` and a fake `ask()`. Test:
    - the create → events → saved answer flow;
    - a follow-up passes the saved session ID;
    - 409 on a second concurrent turn;
