@@ -68,6 +68,13 @@
         <input id="hide-bots" type="checkbox" class="peer sr-only">
         <span class="toggle"></span>
       </label>
+      {% if boot.claude %}
+      <label class="mt-3 flex cursor-pointer items-center justify-between text-xs text-stone-600 dark:text-stone-400">
+        Show Claude threads
+        <input id="show-claude" type="checkbox" class="peer sr-only">
+        <span class="toggle"></span>
+      </label>
+      {% endif %}
       <div class="mt-3 flex gap-2">
         <button id="prev-thread" class="nav-btn flex-1" title="Previous open thread (k)">↑ Prev</button>
         <button id="next-thread" class="nav-btn flex-1" title="Next open thread (j)">Next ↓</button>
@@ -188,6 +195,7 @@
 <button id="selection-add" hidden class="fixed z-50 flex items-center gap-1.5 rounded-full bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white shadow-lg hover:bg-stone-700 dark:bg-amber-400 dark:text-stone-950">
   <svg viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5"><path d="M3 4.5A2.5 2.5 0 0 1 5.5 2h9A2.5 2.5 0 0 1 17 4.5v7a2.5 2.5 0 0 1-2.5 2.5H9l-4 3.5V14h.5A2.5 2.5 0 0 1 3 11.5v-7Z"/></svg>
   Comment <kbd class="ml-1 rounded bg-white/15 px-1 font-mono text-[10px]">c</kbd>
+  {% if boot.claude %}<span class="ml-1 opacity-70">· Ask Claude</span> <kbd class="ml-1 rounded bg-white/15 px-1 font-mono text-[10px]">a</kbd>{% endif %}
 </button>
 
 <!-- Finish review dialog -->

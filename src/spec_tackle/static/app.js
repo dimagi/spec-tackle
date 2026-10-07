@@ -15,6 +15,7 @@
   const API = `/api/pr/${PR.owner}/${PR.repo}/${PR.number}`;
   const POLL_MS = 30_000;
   const GAP = 10;
+  const CLAUDE = !!BOOT.claude;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -48,6 +49,7 @@
     activity: BOOT.activity,
     filter: store.get("filter", "open"),
     hideBots: store.get("hideBots", false),
+    showClaude: store.get("showClaude", true),
     active: null, // thread id, or "composer"
     composer: null, // { path, start, end, el, anchors }
     expanded: new Set(), // thread ids the reviewer opened despite being collapsible
@@ -176,6 +178,7 @@
 
   // ── Thread cards ─────────────────────────────────────────────────────
   const cards = new Map(); // thread id → { el, thread, sig, anchors, fallback }
+  const claudeCards = new Map(); // Claude thread id → { el, thread, anchors, fallback, live, source }
   const resizeObserver = new ResizeObserver(scheduleLayout);
   resizeObserver.observe(doc);
 
@@ -203,6 +206,7 @@
       card.el.hidden = !isShown(t);
       card.el.classList.toggle("is-collapsed", collapsed);
     }
+    for (const card of claudeCards.values()) card.el.hidden = !state.showClaude;
     markAnchors();
     clampBodies();
     updateStats();
@@ -303,8 +307,8 @@
   }
 
   function markAnchors() {
-    $$(".has-thread, .is-active-anchor, .is-drafting", doc).forEach((el) => {
-      el.classList.remove("has-thread", "is-active-anchor", "is-drafting");
+    $$(".has-thread, .has-claude, .is-active-anchor, .is-drafting", doc).forEach((el) => {
+      el.classList.remove("has-thread", "has-claude", "is-active-anchor", "is-drafting");
       delete el._threads;
     });
     for (const card of cards.values()) {
@@ -318,6 +322,20 @@
       const active = state.active === t.id;
       for (const el of card.anchors) {
         if (!t.isResolved || active) el.classList.add("has-thread");
+        if (active) el.classList.add("is-active-anchor");
+        (el._threads ||= []).push(t.id);
+      }
+    }
+    for (const card of claudeCards.values()) {
+      const t = card.thread;
+      const section = sectionFor(t.path);
+      const view = visibleView(section);
+      card.anchors = view ? elementsInRange(view, t.startLine, t.endLine) : [];
+      card.fallback = section ? $(".file-header", section) : $("#description");
+      if (card.el.hidden) continue;
+      const active = state.active === t.id;
+      for (const el of card.anchors) {
+        el.classList.add("has-claude");
         if (active) el.classList.add("is-active-anchor");
         (el._threads ||= []).push(t.id);
       }
@@ -340,6 +358,10 @@
     const base = margin.getBoundingClientRect().top;
     const items = [];
     for (const card of cards.values()) {
+      if (card.el.hidden) continue;
+      items.push({ id: card.thread.id, el: card.el, top: anchorTop(card.anchors, card.fallback) - base });
+    }
+    for (const card of claudeCards.values()) {
       if (card.el.hidden) continue;
       items.push({ id: card.thread.id, el: card.el, top: anchorTop(card.anchors, card.fallback) - base });
     }
@@ -386,17 +408,22 @@
       renderThreads();
     }
     if (scroll && id) {
-      const card = cards.get(id);
+      const card = cards.get(id) || claudeCards.get(id);
       const target = id === "composer" ? state.composer?.anchors?.[0] : card?.anchors?.[0] || card?.fallback;
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
 
   // ── Composer for new comments ────────────────────────────────────────
-  function openComposer({ path, start, end, quote }) {
+  const MODES = {
+    comment: { title: "New comment", help: "Markdown · ⌘↵ to post", submit: "Comment", placeholder: "What should change, or what's unclear?" },
+    claude: { title: "Ask Claude", help: "Private, never posted · ⌘↵ to ask", submit: "Ask Claude", placeholder: "Ask Claude about this passage…" },
+  };
+
+  function openComposer({ path, start, end, quote, mode = "comment" }) {
     if (state.composer) {
       const existing = $("textarea", state.composer.el).value.trim();
-      if (existing && !confirm("Discard your unsent comment?")) return;
+      if (existing && existing !== state.composer.quoteText.trim() && !confirm("Discard your unsent text?")) return;
       closeComposer();
     }
     hideSelectionButton();
@@ -410,29 +437,53 @@
     const el = document.createElement("div");
     el.className = "thread-card composer";
     el.innerHTML = `
-      <div class="thread-head"><span class="chip">${rangeLabel(start, end)}</span><span>New comment</span></div>
-      ${hint}
+      <div class="thread-head"><span class="chip">${rangeLabel(start, end)}</span><span class="composer-title"></span>
+        ${CLAUDE ? `<span class="flex-1"></span><div class="mode-switch"><button data-action="mode-comment">Comment</button><button data-action="mode-claude">Ask Claude</button></div>` : ""}
+      </div>
+      <div class="comment-only">${hint}</div>
       <div class="p-3">
-        <div class="tabs"><button class="on" data-action="tab-write">Write</button><button data-action="tab-preview">Preview</button></div>
-        <textarea rows="4" class="field" placeholder="What should change, or what's unclear?"></textarea>
+        <div class="tabs comment-only"><button class="on" data-action="tab-write">Write</button><button data-action="tab-preview">Preview</button></div>
+        <textarea rows="4" class="field"></textarea>
         <div class="preview comment-body prose prose-stone prose-sm max-w-none dark:prose-invert" hidden></div>
         <div class="mt-2 flex items-center gap-2">
-          <span class="text-[11px] text-stone-400">Markdown · ⌘↵ to post</span>
+          <span class="composer-help text-[11px] text-stone-400"></span>
           <span class="flex-1"></span>
           <button class="btn-ghost" data-action="composer-cancel">Cancel</button>
-          <button class="btn-primary" data-action="composer-submit">Comment</button>
+          <button class="btn-primary" data-action="composer-submit"></button>
         </div>
       </div>`;
     margin.append(el);
     resizeObserver.observe(el);
-    state.composer = { path, start, end, el, anchors: [] };
-    const textarea = $("textarea", el);
-    if (quote) textarea.value = `> ${quote.replace(/\n+/g, "\n> ")}\n\n`;
+    const quoteText = quote ? `> ${quote.replace(/\n+/g, "\n> ")}\n\n` : "";
+    state.composer = { path, start, end, el, anchors: [], mode, quoteText };
+    $("textarea", el).value = mode === "claude" ? "" : quoteText;
+    setComposerMode(CLAUDE ? mode : "comment");
     activate("composer");
     markAnchors();
     layout();
+  }
+
+  /** Switch the composer between posting to GitHub and asking Claude privately. */
+  function setComposerMode(mode) {
+    const c = state.composer;
+    const textarea = $("textarea", c.el);
+    const m = MODES[mode];
+    if (mode === "claude") {
+      togglePreview(c.el, false); // Preview calls GitHub; never in Claude mode
+      if (textarea.value === c.quoteText) textarea.value = "";
+    } else if (!textarea.value) {
+      textarea.value = c.quoteText;
+    }
+    c.mode = mode;
+    c.el.classList.toggle("is-claude", mode === "claude");
+    $(".composer-title", c.el).textContent = m.title;
+    $(".composer-help", c.el).textContent = m.help;
+    $("[data-action=composer-submit]", c.el).textContent = m.submit;
+    textarea.placeholder = m.placeholder;
+    $$(".mode-switch button", c.el).forEach((b) => b.classList.toggle("on", b.dataset.action === `mode-${mode}`));
     textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    scheduleLayout();
   }
 
   function closeComposer() {
@@ -447,6 +498,7 @@
 
   async function submitComposer() {
     const c = state.composer;
+    if (c.mode === "claude") return askClaude();
     const textarea = $("textarea", c.el);
     const body = textarea.value.trim();
     if (!body) return textarea.focus();
@@ -466,7 +518,7 @@
     } catch (err) {
       toast(err.message, { kind: "error", timeout: 8000 });
       button.disabled = false;
-      button.textContent = "Comment";
+      button.textContent = MODES[c.mode].submit;
     }
   }
 
@@ -542,10 +594,199 @@
     }
   }
 
+  // ── Private Claude threads ───────────────────────────────────────────
+  async function askClaude() {
+    const c = state.composer;
+    const textarea = $("textarea", c.el);
+    const question = textarea.value.trim();
+    if (!question) return textarea.focus();
+    const button = $("[data-action=composer-submit]", c.el);
+    button.disabled = true;
+    button.textContent = "Asking…";
+    try {
+      const thread = await request("POST", `${API}/claude/threads`, {
+        path: c.path, start: c.start, end: c.end, commit: RENDERED_SHA, question,
+      });
+      closeComposer();
+      upsertClaudeThread(thread);
+      renderThreads();
+      listen(thread.id);
+      activate(thread.id);
+    } catch (err) {
+      toast(err.message, { kind: "error", timeout: 8000 });
+      button.disabled = false;
+      button.textContent = MODES.claude.submit;
+    }
+  }
+
+  function createClaudeCard(t) {
+    const el = document.createElement("div");
+    el.className = "thread-card claude";
+    el.dataset.claude = t.id;
+    el.innerHTML = `
+      <div class="thread-head"></div>
+      <div class="claude-note"></div>
+      <div class="thread-body"></div>
+      <div class="thread-reply">
+        <textarea rows="1" placeholder="Ask a follow-up…"></textarea>
+        <div class="actions" hidden>
+          <span class="text-[11px] text-stone-400">Private · ⌘↵ to ask</span>
+          <span class="flex-1"></span>
+          <button class="btn-ghost" data-action="reply-cancel">Cancel</button>
+          <button class="btn-primary" data-action="claude-followup">Ask</button>
+        </div>
+      </div>`;
+    return el;
+  }
+
+  function claudeMessageHTML(m) {
+    if (m.role === "user") {
+      return `<div class="comment"><div class="min-w-0 flex-1">
+        <div class="comment-meta"><b>You</b>${timeTag(m.createdAt)}</div>
+        <div class="comment-body whitespace-pre-wrap">${esc(m.body)}</div></div></div>`;
+    }
+    if (m.role === "error") {
+      return `<div class="comment claude-error"><div class="min-w-0 flex-1">
+        <div class="comment-meta"><b>Couldn't answer</b>${timeTag(m.createdAt)}</div>
+        <div class="comment-body">${esc(m.body)}</div></div></div>`;
+    }
+    return `<div class="comment"><div class="min-w-0 flex-1">
+      <div class="comment-meta"><b>Claude</b>${timeTag(m.createdAt)}</div>
+      <div class="comment-body prose prose-stone prose-sm max-w-none dark:prose-invert">${m.bodyHTML}</div></div></div>`;
+  }
+
+  function fillClaudeCard(card) {
+    const t = card.thread;
+    const head = state.activity.headSha;
+    $(".thread-head", card.el).innerHTML = `
+      <span class="chip chip-claude">Claude · private</span>
+      <span class="chip" title="${esc(t.path)}">${rangeLabel(t.startLine, t.endLine)}</span>
+      <span class="flex-1"></span>
+      <button class="icon-btn" data-action="claude-delete" title="Delete this thread">Delete</button>`;
+    $(".claude-note", card.el).innerHTML = t.commit !== head
+      ? `<div class="hint">Asked on <code>${esc(t.commit.slice(0, 7))}</code>; the PR is now at <code>${esc(head.slice(0, 7))}</code>.</div>`
+      : "";
+    const last = t.messages[t.messages.length - 1];
+    let tail = "";
+    if (card.live) {
+      tail = `<div class="comment"><div class="min-w-0 flex-1">
+        <div class="comment-meta"><b>Claude</b><span class="spinner"></span><span class="text-[11px] text-stone-400">${esc(card.live.tool)}</span></div>
+        ${card.live.text ? `<div class="comment-body whitespace-pre-wrap">${esc(card.live.text)}</div>` : ""}</div></div>`;
+    } else if (!t.running && last?.role === "user") {
+      tail = `<div class="hint warn">Interrupted. Ask again.</div>`;
+    }
+    $(".thread-body", card.el).innerHTML = t.messages.map(claudeMessageHTML).join("") + tail;
+    $$(".comment-body a", card.el).forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+    $(".thread-reply textarea", card.el).disabled = !!card.live;
+    scheduleLayout();
+  }
+
+  function upsertClaudeThread(t) {
+    let card = claudeCards.get(t.id);
+    if (!card) {
+      card = { el: createClaudeCard(t), live: null, source: null, anchors: [], fallback: null };
+      claudeCards.set(t.id, card);
+      margin.append(card.el);
+      resizeObserver.observe(card.el);
+    }
+    card.thread = t;
+    fillClaudeCard(card);
+  }
+
+  function removeClaudeCard(id) {
+    const card = claudeCards.get(id);
+    if (!card) return;
+    card.source?.close();
+    resizeObserver.unobserve(card.el);
+    card.el.remove();
+    claudeCards.delete(id);
+    if (state.active === id) state.active = null;
+  }
+
+  async function loadClaudeThreads() {
+    if (!CLAUDE) return;
+    let threads;
+    try {
+      threads = await request("GET", `${API}/claude/threads`);
+    } catch (err) {
+      return toast(`Couldn't load Claude threads: ${err.message}`, { kind: "error" });
+    }
+    const ids = new Set(threads.map((t) => t.id));
+    for (const id of [...claudeCards.keys()]) if (!ids.has(id)) removeClaudeCard(id);
+    threads.forEach(upsertClaudeThread);
+    renderThreads();
+    threads.filter((t) => t.running).forEach((t) => listen(t.id));
+  }
+
+  /** Follow a running turn; any tab (or a reload) can join part-way through. */
+  function listen(id) {
+    const card = claudeCards.get(id);
+    if (!card || card.source) return;
+    card.live = { text: "", tool: "Thinking…" };
+    fillClaudeCard(card);
+    const source = new EventSource(`/api/claude/threads/${encodeURIComponent(id)}/events`);
+    card.source = source;
+    const finish = () => {
+      source.close();
+      card.source = null;
+      card.live = null;
+      loadClaudeThreads();
+    };
+    source.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+      if (ev.type === "text") card.live.text += ev.text;
+      else if (ev.type === "tool") card.live.tool = ev.text;
+      else return finish(); // done, error or idle
+      fillClaudeCard(card);
+    };
+    source.onerror = finish;
+  }
+
+  async function submitFollowup(cardEl) {
+    const id = cardEl.dataset.claude;
+    const textarea = $(".thread-reply textarea", cardEl);
+    const question = textarea.value.trim();
+    if (!question) return textarea.focus();
+    const button = $("[data-action=claude-followup]", cardEl);
+    button.disabled = true;
+    try {
+      const thread = await request("POST", `/api/claude/threads/${encodeURIComponent(id)}/messages`, { question });
+      textarea.value = "";
+      collapseReply(cardEl);
+      upsertClaudeThread(thread);
+      listen(id);
+    } catch (err) {
+      toast(err.message, { kind: "error", timeout: 8000 });
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function deleteClaudeThread(id) {
+    if (!confirm("Delete this Claude thread? This can't be undone.")) return;
+    try {
+      await request("DELETE", `/api/claude/threads/${encodeURIComponent(id)}`);
+      removeClaudeCard(id);
+      renderThreads();
+    } catch (err) {
+      toast(err.message, { kind: "error", timeout: 8000 });
+    }
+  }
+
   // ── Margin interactions (event delegation) ───────────────────────────
   margin.addEventListener("click", (e) => {
     const cardEl = e.target.closest(".thread-card");
     if (!cardEl) return;
+    if (cardEl.classList.contains("claude")) {
+      const cid = cardEl.dataset.claude;
+      switch (e.target.closest("[data-action]")?.dataset.action) {
+        case "claude-delete": return deleteClaudeThread(cid);
+        case "claude-followup": return submitFollowup(cardEl);
+        case "reply-cancel": $(".thread-reply textarea", cardEl).value = ""; return collapseReply(cardEl);
+      }
+      if (!e.target.closest("a, textarea, button") && state.active !== cid) activate(cid);
+      return;
+    }
     const action = e.target.closest("[data-action]")?.dataset.action;
     const id = cardEl.dataset.thread;
     switch (action) {
@@ -575,6 +816,8 @@
       case "composer-submit": return submitComposer();
       case "tab-write": return togglePreview(cardEl, false);
       case "tab-preview": return togglePreview(cardEl, true);
+      case "mode-comment": return setComposerMode("comment");
+      case "mode-claude": return setComposerMode("claude");
     }
     if (e.target.closest("a, textarea, button")) return;
     if (cardEl.classList.contains("composer")) return activate("composer");
@@ -585,12 +828,13 @@
     const cardEl = e.target.closest(".thread-card");
     if (e.target.matches(".thread-reply textarea")) {
       expandReply(cardEl);
-      if (state.active !== cardEl.dataset.thread) activate(cardEl.dataset.thread);
+      const tid = cardEl.dataset.thread || cardEl.dataset.claude;
+      if (state.active !== tid) activate(tid);
     }
   });
 
   margin.addEventListener("input", (e) => {
-    if (e.target.matches(".thread-reply textarea")) {
+    if (e.target.matches(".thread-reply textarea") && e.target.closest(".thread-card").dataset.thread) {
       store.set(`draft:${e.target.closest(".thread-card").dataset.thread}`, e.target.value || null);
     }
   });
@@ -601,6 +845,7 @@
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       if (cardEl.classList.contains("composer")) submitComposer();
+      else if (cardEl.classList.contains("claude")) submitFollowup(cardEl);
       else submitReply(cardEl);
     } else if (e.key === "Escape") {
       e.stopPropagation();
@@ -649,7 +894,7 @@
   doc.addEventListener("click", (e) => {
     if (e.target.closest("a, button, summary, input, textarea")) return;
     if (!getSelection().isCollapsed) return;
-    const anchor = e.target.closest(".has-thread");
+    const anchor = e.target.closest(".has-thread, .has-claude");
     if (anchor?._threads?.length) {
       const list = anchor._threads;
       const next = list[(list.indexOf(state.active) + 1) % list.length];
@@ -752,6 +997,7 @@
     if (e.key === "j") stepThread(1);
     else if (e.key === "k") stepThread(-1);
     else if (e.key === "c" && pendingSelection) { e.preventDefault(); openComposer(pendingSelection); getSelection().removeAllRanges(); }
+    else if (e.key === "a" && CLAUDE && pendingSelection) { e.preventDefault(); openComposer({ ...pendingSelection, mode: "claude" }); getSelection().removeAllRanges(); }
     else if (e.key === "r" && cards.get(state.active)) { e.preventDefault(); $(".thread-reply textarea", cards.get(state.active).el)?.focus(); }
     else if (e.key === "Escape") {
       if (state.composer && !$("textarea", state.composer.el).value.trim()) closeComposer();
@@ -784,6 +1030,8 @@
   function renderFilters() {
     $$("[data-filter]").forEach((b) => b.classList.toggle("on", b.dataset.filter === state.filter));
     $("#hide-bots").checked = state.hideBots;
+    const showClaude = $("#show-claude");
+    if (showClaude) showClaude.checked = state.showClaude;
   }
   $$("[data-filter]").forEach((b) => b.addEventListener("click", () => {
     state.filter = b.dataset.filter;
@@ -796,6 +1044,12 @@
     store.set("hideBots", state.hideBots);
     renderThreads();
     renderConversation();
+  });
+
+  $("#show-claude")?.addEventListener("change", (e) => {
+    state.showClaude = e.target.checked;
+    store.set("showClaude", state.showClaude);
+    renderThreads();
   });
 
   // Scroll-spy for the outline.
@@ -938,6 +1192,7 @@
     $("#new-commits").hidden = next.headSha === RENDERED_SHA;
     renderState();
     renderThreads();
+    for (const card of claudeCards.values()) if (!card.live) fillClaudeCard(card);
     renderConversation();
 
     if (arrivals.length) {
@@ -1006,6 +1261,7 @@
   renderState();
   renderThreads();
   renderConversation();
+  loadClaudeThreads();
   renderSync();
   spy();
 })();

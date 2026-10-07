@@ -14,6 +14,8 @@
   --card: #ffffff;
   --card-border: #e7e5e4;
   --code-bg: #f7f6f4;
+  --claude: #7c3aed;
+  --claude-soft: rgba(124, 58, 237, 0.10);
 }
 html.dark {
   --paper: #1c1917;
@@ -26,6 +28,8 @@ html.dark {
   --card: #1c1917;
   --card-border: #36302c;
   --code-bg: #141110;
+  --claude: #a78bfa;
+  --claude-soft: rgba(167, 139, 250, 0.14);
 }
 
 /* ── Surfaces ─────────────────────────────────────────── */
@@ -334,3 +338,19 @@ kbd { font: 500 10px "JetBrains Mono", monospace; padding: 0 4px; border-radius:
 .theme-switch button:hover { color: var(--ink); }
 .theme-switch button.on { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 .theme-switch svg { width: 14px; height: 14px; }
+
+/* ── Private Claude threads ─────────────────────────── */
+.thread-card.claude { border-left: 3px solid var(--claude); }
+.thread-card.claude.is-active,
+.thread-card.composer.is-claude.is-active { box-shadow: 0 0 0 2px var(--claude), 0 10px 30px rgba(28,25,23,.12); }
+.chip-claude { background: var(--claude-soft); color: var(--claude); font-family: Inter, sans-serif; }
+.view .has-claude:not(.has-thread) { background: var(--claude-soft); box-shadow: -3px 0 0 var(--claude); }
+.mode-switch { display: flex; gap: 2px; border-radius: 8px; background: rgba(120,113,108,.12); padding: 2px; }
+.mode-switch button { border-radius: 6px; padding: 1px 8px; font-weight: 600; }
+.mode-switch button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.composer.is-claude .mode-switch button.on { color: var(--claude); }
+.composer.is-claude .comment-only { display: none; }
+.claude-error { color: #b91c1c; }
+html.dark .claude-error { color: #fca5a5; }
+.spinner { display: inline-block; width: 10px; height: 10px; border-radius: 999px; border: 2px solid var(--claude); border-right-color: transparent; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
