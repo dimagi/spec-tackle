@@ -12,7 +12,7 @@ from .github import PRRef
 
 # Each entry moves the schema up one version (tracked in PRAGMA user_version).
 _MIGRATIONS = [
-    # 1: recent PRs (see docs/specs/recent-prs.md)
+    # 1: recent PRs (table kept for a possible future feature)
     """
     CREATE TABLE recent_prs (
         login TEXT NOT NULL, owner TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL,
