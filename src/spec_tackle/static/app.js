@@ -499,10 +499,11 @@
   async function submitComposer() {
     const c = state.composer;
     if (c.mode === "claude") return askClaude();
+    const button = $("[data-action=composer-submit]", c.el);
+    if (button.disabled) return; // ⌘↵ while a post is in flight
     const textarea = $("textarea", c.el);
     const body = textarea.value.trim();
     if (!body) return textarea.focus();
-    const button = $("[data-action=composer-submit]", c.el);
     button.disabled = true;
     button.textContent = "Posting…";
     try {
@@ -556,10 +557,11 @@
 
   async function submitReply(cardEl) {
     const card = cards.get(cardEl.dataset.thread);
+    const button = $("[data-action=reply-submit]", cardEl);
+    if (button.disabled) return; // ⌘↵ while a reply is in flight
     const textarea = $(".thread-reply textarea", cardEl);
     const body = textarea.value.trim();
     if (!body) return textarea.focus();
-    const button = $("[data-action=reply-submit]", cardEl);
     button.disabled = true;
     try {
       const created = await request("POST", `${API}/replies`, { commentId: card.thread.comments[0].id, body });
@@ -597,10 +599,11 @@
   // ── Private Claude threads ───────────────────────────────────────────
   async function askClaude() {
     const c = state.composer;
+    const button = $("[data-action=composer-submit]", c.el);
+    if (button.disabled) return; // ⌘↵ while a question is in flight
     const textarea = $("textarea", c.el);
     const question = textarea.value.trim();
     if (!question) return textarea.focus();
-    const button = $("[data-action=composer-submit]", c.el);
     button.disabled = true;
     button.textContent = "Asking…";
     try {
@@ -744,10 +747,11 @@
 
   async function submitFollowup(cardEl) {
     const id = cardEl.dataset.claude;
+    const button = $("[data-action=claude-followup]", cardEl);
+    if (button.disabled) return; // ⌘↵ while a follow-up is in flight
     const textarea = $(".thread-reply textarea", cardEl);
     const question = textarea.value.trim();
     if (!question) return textarea.focus();
-    const button = $("[data-action=claude-followup]", cardEl);
     button.disabled = true;
     try {
       const thread = await request("POST", `/api/claude/threads/${encodeURIComponent(id)}/messages`, { question });
