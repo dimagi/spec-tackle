@@ -10,6 +10,8 @@ import importlib.util
 import os
 import re
 import shutil
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 
 TOOLS = ["Read", "Grep", "Glob"]
@@ -253,3 +255,78 @@ def describe_error(exc: BaseException) -> str:
     if any(s in lowered for s in ("/login", "not logged in", "invalid api key", "authentication")):
         return "Claude Code isn't signed in. Run `claude` in a terminal to sign in, then ask again."
     return f"Claude failed: {text}"
+
+
+# -- talking to Claude -------------------------------------------------------
+
+
+@dataclass
+class Event:
+    kind: str  # "text" | "tool" | "done"
+    text: str = ""
+    session_id: str | None = None
+
+
+async def ask(
+    *,
+    cli: str,
+    cwd: Path,
+    snapshot: str,
+    question: str,
+    full_prompt: str,
+    session_id: str | None,
+    query=None,
+) -> AsyncIterator[Event]:
+    """Run one turn. Follow-ups resume the session; if it has expired, replay instead."""
+    from claude_agent_sdk import ResultError, query as sdk_query
+
+    run = query or sdk_query
+    if session_id:
+        options = _options(cli=cli, cwd=cwd, snapshot=snapshot, resume=session_id)
+        try:
+            async for event in _turn(run=run, prompt=question, options=options, root=cwd):
+                yield event
+            return
+        except ResultError as exc:
+            if "No conversation found" not in str(exc):
+                raise
+    options = _options(cli=cli, cwd=cwd, snapshot=snapshot, resume=None)
+    async for event in _turn(run=run, prompt=full_prompt, options=options, root=cwd):
+        yield event
+
+
+def _options(*, cli: str, cwd: Path, snapshot: str, resume: str | None):
+    from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
+
+    return ClaudeAgentOptions(
+        cli_path=cli,
+        cwd=str(cwd),
+        tools=TOOLS,
+        allowed_tools=TOOLS,
+        system_prompt={"type": "preset", "preset": "claude_code", "append": f"{SYSTEM_PROMPT}\n\n{snapshot}"},
+        setting_sources=["user"],
+        include_partial_messages=True,
+        resume=resume,
+        hooks={"PreToolUse": [HookMatcher(hooks=[make_guard(cwd)])]},
+    )
+
+
+async def _turn(*, run, prompt: str, options, root: Path) -> AsyncIterator[Event]:
+    from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, TextBlock, ToolUseBlock
+
+    answer: list[str] = []
+    session = None
+    async for message in run(prompt=prompt, options=options):
+        if isinstance(message, StreamEvent):
+            event = message.event
+            if event.get("type") == "content_block_delta" and event["delta"].get("type") == "text_delta":
+                yield Event(kind="text", text=event["delta"]["text"])
+        elif isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    answer.append(block.text)
+                elif isinstance(block, ToolUseBlock):
+                    yield Event(kind="tool", text=tool_label(name=block.name, tool_input=block.input, root=root))
+        elif isinstance(message, ResultMessage):
+            session = message.session_id
+    yield Event(kind="done", text="\n\n".join(answer), session_id=session)
