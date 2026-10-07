@@ -100,6 +100,7 @@
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join("; ") : data.detail;
+      if (data.signedOut) showSignedOut();
       throw new Error(data.error || detail || `Request failed (${res.status})`);
     }
     return data;
@@ -111,7 +112,20 @@
     el.innerHTML = esc(message) + (action ? ` <button>${esc(action)}</button>` : "");
     if (action) el.querySelector("button").onclick = () => { onAction(); el.remove(); };
     $("#toasts").append(el);
-    setTimeout(() => el.remove(), timeout);
+    if (timeout) setTimeout(() => el.remove(), timeout);
+  }
+
+  // GitHub stopped accepting the sign-in: say so once, and offer a way back here after signing in.
+  let signedOut = false;
+  function showSignedOut() {
+    if (signedOut) return;
+    signedOut = true;
+    toast("You're signed out of GitHub, so comments can't be posted or refreshed.", {
+      kind: "error",
+      timeout: 0,
+      action: "Sign in",
+      onAction: () => { location.href = `/?next=${encodeURIComponent(location.pathname)}`; },
+    });
   }
 
   let layoutQueued = false;
@@ -891,7 +905,10 @@
 
   function renderSync(fetching = false) {
     syncDot.className = `h-2 w-2 rounded-full ${fetching ? "bg-amber-400 animate-pulse" : syncError ? "bg-rose-500" : "bg-emerald-500"}`;
-    syncLabel.textContent = fetching ? "Checking…" : syncError ? "Sync failed — retrying" : `Live · ${timeAgo(new Date(state.lastSync).toISOString())}`;
+    syncLabel.textContent = fetching ? "Checking…"
+      : signedOut ? "Signed out"
+      : syncError ? "Sync failed — retrying"
+      : `Live · ${timeAgo(new Date(state.lastSync).toISOString())}`;
     if (syncError) syncLabel.parentElement.title = syncError;
   }
 
@@ -952,6 +969,7 @@
         applyActivity(await request("GET", `${API}/activity`));
         state.lastSync = Date.now();
         syncError = null;
+        signedOut = false;
       } catch (err) {
         syncError = err.message;
       } finally {

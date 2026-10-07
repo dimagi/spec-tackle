@@ -5,7 +5,10 @@
   <title>spec-tackle</title>
 </head>
 <body class="min-h-screen bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100 font-sans antialiased">
-  <div class="fixed right-5 top-4">{% include "_theme_switch.html" %}</div>
+  <div class="fixed right-5 top-4 flex items-center gap-3">
+    {% include "_viewer.html" %}
+    {% include "_theme_switch.html" %}
+  </div>
   <main class="mx-auto grid min-h-screen max-w-6xl content-center items-center gap-x-16 gap-y-10 px-6 py-16 lg:grid-cols-[minmax(0,1fr)_460px]">
     <div class="w-full max-w-[320px] lg:order-last lg:max-w-none" aria-hidden="true">
       {% include "_spectacles.svg" %}
@@ -21,6 +24,61 @@
       </p>
     </div>
 
+    {% if not viewer %}
+    <section id="signin" class="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm dark:border-stone-800 dark:bg-stone-900">
+      <div class="flex items-start gap-3">
+        <svg viewBox="0 0 16 16" class="mt-0.5 h-6 w-6 shrink-0 fill-current" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <div>
+          <h2 class="font-semibold">Sign in to GitHub to start</h2>
+          <p class="mt-1 text-sm text-stone-600 dark:text-stone-400">
+            {{ notice or "spec-tackle reads pull requests and posts your comments as you, so it needs your GitHub sign-in." }}
+          </p>
+        </div>
+      </div>
+
+      {% if gh_cli %}
+      <button id="signin-start" class="mt-5 inline-flex items-center gap-2 rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-700 disabled:opacity-60 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300">
+        Sign in with GitHub
+      </button>
+      <div id="signin-steps" hidden class="mt-5 space-y-4 text-sm">
+        <div>
+          <div class="text-stone-500">1. Copy your one-time code</div>
+          <div class="mt-1.5 flex items-center gap-3">
+            <code id="signin-code" class="rounded-lg bg-stone-100 px-3 py-1.5 font-mono text-2xl font-semibold tracking-[0.2em] dark:bg-stone-800"></code>
+            <button id="signin-copy" class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800">Copy</button>
+          </div>
+        </div>
+        <div>
+          <div class="text-stone-500">2. Enter it on GitHub and approve</div>
+          <a id="signin-open" target="_blank" rel="noopener" class="mt-1.5 inline-flex rounded-xl bg-stone-900 px-5 py-2.5 font-semibold text-white shadow-sm hover:bg-stone-700 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300">Open GitHub ↗</a>
+        </div>
+        <div class="flex items-center gap-2 text-stone-500">
+          <span class="h-2 w-2 animate-pulse rounded-full bg-amber-400"></span> Waiting for you to approve on GitHub…
+        </div>
+      </div>
+      {% else %}
+      <p class="mt-5 text-sm text-stone-600 dark:text-stone-400">
+        Install the <a class="underline" href="https://cli.github.com" target="_blank" rel="noopener">GitHub CLI</a> and run
+        <code class="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs dark:bg-stone-800">gh auth login</code>, then reload this page. Or use a token below.
+      </p>
+      {% endif %}
+
+      <details class="mt-5 text-sm" {% if not gh_cli %}open{% endif %}>
+        <summary class="cursor-pointer select-none text-stone-500 hover:text-stone-800 dark:hover:text-stone-200">Use a personal access token instead</summary>
+        <form id="token-form" class="mt-3 flex flex-col gap-2 sm:flex-row">
+          <input name="token" type="password" autocomplete="off" required placeholder="github_pat_…"
+            class="flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 font-mono text-sm outline-none ring-amber-400/40 focus:border-amber-500 focus:ring-4 dark:border-stone-700 dark:bg-stone-900">
+          <button class="rounded-lg bg-stone-200 px-4 py-2 font-semibold hover:bg-stone-300 dark:bg-stone-800 dark:hover:bg-stone-700">Use token</button>
+        </form>
+        <p class="mt-2 text-xs text-stone-500">
+          <a class="underline" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a>
+          with <em>Contents: read</em> and <em>Pull requests: read and write</em>. It's kept in memory until spec-tackle stops.
+        </p>
+      </details>
+
+      <p id="signin-error" hidden class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200"></p>
+    </section>
+    {% else %}
     <form action="/" method="get" class="flex flex-col gap-3 sm:flex-row">
       <input name="url" required autofocus value="{{ url or '' }}"
         placeholder="https://github.com/org/repo/pull/123"
@@ -29,6 +87,7 @@
         Open for review →
       </button>
     </form>
+    {% endif %}
 
     {% if error %}
     <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
@@ -41,5 +100,69 @@
     </p>
     </div>
   </main>
+  {% if not viewer %}
+  <script>
+    (() => {
+      const next = {{ next_url | tojson }};
+      const $ = (id) => document.getElementById(id);
+      const errorEl = $("signin-error");
+      const finish = () => { location.href = next || "/"; };
+      const showError = (message) => { errorEl.textContent = message; errorEl.hidden = false; };
+
+      async function call(method, url, body) {
+        const res = await fetch(url, {
+          method,
+          headers: body ? { "Content-Type": "application/json" } : {},
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.detail || `Request failed (${res.status})`);
+        return data;
+      }
+
+      const start = $("signin-start");
+      if (start) start.onclick = async () => {
+        errorEl.hidden = true;
+        start.disabled = true;
+        start.textContent = "Starting…";
+        try {
+          let status = await call("POST", "/auth/login");
+          if (status.state === "failed") throw new Error(status.message);
+          $("signin-code").textContent = status.code;
+          $("signin-open").href = status.url;
+          $("signin-steps").hidden = false;
+          start.hidden = true;
+          while (status.state === "waiting") {
+            await new Promise((r) => setTimeout(r, 2000));
+            status = await call("GET", "/auth/login");
+          }
+          if (status.state !== "done") throw new Error(status.message);
+          finish();
+        } catch (err) {
+          showError(err.message);
+          $("signin-steps").hidden = true;
+          start.hidden = false;
+          start.disabled = false;
+          start.textContent = "Try again";
+        }
+      };
+
+      $("signin-copy")?.addEventListener("click", async (e) => {
+        try { await navigator.clipboard.writeText($("signin-code").textContent); e.target.textContent = "Copied"; } catch {}
+      });
+
+      $("token-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errorEl.hidden = true;
+        try {
+          await call("POST", "/auth/token", { token: e.target.token.value });
+          finish();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

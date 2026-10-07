@@ -7,7 +7,7 @@ uv run spec-tackle https://github.com/dimagi/commcare-connect/pull/1569/changes
 # or start it empty and paste a link:  uv run spec-tackle
 ```
 
-Opens `http://127.0.0.1:8765`. It authenticates with `GITHUB_TOKEN`/`GH_TOKEN`, or falls back to `gh auth token`.
+Opens `http://127.0.0.1:8765`. It authenticates with `GITHUB_TOKEN`/`GH_TOKEN`, or falls back to `gh auth token`. If you're not signed in, the page offers **Sign in with GitHub** (via the GitHub CLI) or lets you paste a token.
 
 ## What you get
 

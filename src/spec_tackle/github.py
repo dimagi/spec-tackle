@@ -43,17 +43,21 @@ def parse_pr_url(value: str) -> PRRef:
     return PRRef(owner, repo, int(number))
 
 
-def get_token() -> str:
+def find_token() -> str | None:
+    """A token from GITHUB_TOKEN / GH_TOKEN, else from the GitHub CLI; None if signed out."""
     for var in ("GITHUB_TOKEN", "GH_TOKEN"):
         if os.environ.get(var):
             return os.environ[var]
-    if shutil.which("gh"):
-        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    raise GitHubError(
-        "No GitHub token found. Set GITHUB_TOKEN or run `gh auth login`.", status=401
-    )
+    return gh_cli_token()
+
+
+def gh_cli_token() -> str | None:
+    if not shutil.which("gh"):
+        return None
+    result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return None
 
 
 _AUTHOR = "author { __typename login avatarUrl }"
@@ -151,6 +155,10 @@ class GitHub:
         return items
 
     # -- reads -------------------------------------------------------------
+
+    async def viewer(self) -> dict:
+        data = (await self._request("GET", "/user")).json()
+        return {"login": data["login"], "name": data.get("name"), "avatarUrl": data["avatar_url"]}
 
     async def overview(self, pr: PRRef) -> dict:
         data = await self._graphql(

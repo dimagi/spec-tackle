@@ -6,7 +6,7 @@ import webbrowser
 
 import uvicorn
 
-from .github import GitHubError, get_token, parse_pr_url
+from .github import find_token, parse_pr_url
 
 
 def main() -> None:
@@ -19,10 +19,8 @@ def main() -> None:
     parser.add_argument("--no-browser", action="store_true", help="Don't open a browser tab")
     args = parser.parse_args()
 
-    try:
-        get_token()
-    except GitHubError as exc:
-        parser.exit(1, f"spec-tackle: {exc}\n")
+    if not find_token():
+        print("spec-tackle: not signed in to GitHub. You can sign in from the page.")
 
     url = f"http://{args.host}:{args.port}/"
     if args.pr:
