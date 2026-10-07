@@ -1,4 +1,4 @@
-# spec-tackle
+# Spec-Tackle
 
 <p align="center">
   <picture>
