@@ -64,7 +64,7 @@ def test_options_lock_claude_down(tmp_path):
     fake = FakeQuery([_result()])
     _collect(fake, tmp_path)
     prompt, options = fake.calls[0]
-    assert prompt == "FULL"
+    assert prompt.startswith("SNAP") and "FULL" in prompt
     assert options.cli_path == "/bin/claude"
     assert options.cwd == str(tmp_path)
     assert options.tools == ["Read", "Grep", "Glob"] == options.allowed_tools
@@ -72,8 +72,20 @@ def test_options_lock_claude_down(tmp_path):
     assert options.include_partial_messages is True
     assert options.resume is None
     assert options.system_prompt["preset"] == "claude_code"
-    assert options.system_prompt["append"].endswith("SNAP")
-    assert len(options.hooks["PreToolUse"][0].hooks) == 1
+    assert "SNAP" not in options.system_prompt["append"]
+    assert options.verbatim_prompts is True
+    [guard] = options.hooks["PreToolUse"][0].hooks
+    outside = {"tool_name": "Read", "tool_input": {"file_path": "/etc/passwd"}, "cwd": str(tmp_path)}
+    decision = asyncio.run(guard(outside, None, None))
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_large_snapshot_stays_out_of_the_command_line(tmp_path):
+    fake = FakeQuery([_result()])
+    _collect(fake, tmp_path, snapshot="x" * 300_000)
+    prompt, options = fake.calls[0]
+    assert len(options.system_prompt["append"].encode()) < 100_000
+    assert prompt.startswith("x" * 300_000)
 
 
 def test_follow_up_resumes_with_just_the_question(tmp_path):
@@ -87,7 +99,8 @@ def test_expired_session_falls_back_to_full_prompt(tmp_path):
     gone = ResultError("No conversation found with session ID: sess-1")
     fake = FakeQuery(gone, [AssistantMessage(content=[TextBlock(text="ok")], model="m"), _result("sess-2")])
     events = _collect(fake, tmp_path, session_id="sess-1")
-    assert [c[0] for c in fake.calls] == ["Q?", "FULL"]
+    assert fake.calls[0][0] == "Q?"
+    assert fake.calls[1][0].startswith("SNAP") and "FULL" in fake.calls[1][0]
     assert fake.calls[1][1].resume is None
     assert events[-1].session_id == "sess-2"
 

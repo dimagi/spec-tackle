@@ -25,7 +25,7 @@ with Read, Grep and Glob; you cannot edit files or run commands, so never offer 
 Answer the reviewer's question directly and concisely. Cite files as path:line.
 When the question is about whether the spec matches the existing code, check the code.
 
-The pull request follows."""
+The pull request is included at the start of the conversation."""
 
 
 def find_cli() -> str | None:
@@ -177,7 +177,7 @@ def build_context(
     commit: str,
     limit: int = SNAPSHOT_LIMIT,
 ) -> str:
-    """Everything about the PR, as text for Claude's system prompt."""
+    """Everything about the PR, as text for the first message of a Claude session."""
     author = (overview.get("author") or {}).get("login", "ghost")
     state = activity["state"].lower() + (" (draft)" if activity["isDraft"] else "")
     head = [
@@ -252,7 +252,7 @@ def tool_label(*, name: str, tool_input: dict, root: Path) -> str:
 def describe_error(exc: BaseException) -> str:
     text = str(exc)
     lowered = text.lower()
-    if any(s in lowered for s in ("/login", "not logged in", "invalid api key", "authentication")):
+    if any(s in lowered for s in ("/login", "not logged in", "invalid api key", "please run /login")):
         return "Claude Code isn't signed in. Run `claude` in a terminal to sign in, then ask again."
     return f"Claude failed: {text}"
 
@@ -277,12 +277,17 @@ async def ask(
     session_id: str | None,
     query=None,
 ) -> AsyncIterator[Event]:
-    """Run one turn. Follow-ups resume the session; if it has expired, replay instead."""
+    """Run one turn. Follow-ups resume the session; if it has expired, replay instead.
+
+    A new session gets the snapshot at the start of its first message, not in the
+    system prompt: the SDK passes the system prompt as one command-line argument,
+    which Linux caps at 128 KiB.
+    """
     from claude_agent_sdk import ResultError, query as sdk_query
 
     run = query or sdk_query
     if session_id:
-        options = _options(cli=cli, cwd=cwd, snapshot=snapshot, resume=session_id)
+        options = _options(cli=cli, cwd=cwd, resume=session_id)
         try:
             async for event in _turn(run=run, prompt=question, options=options, root=cwd):
                 yield event
@@ -290,12 +295,13 @@ async def ask(
         except ResultError as exc:
             if "No conversation found" not in str(exc):
                 raise
-    options = _options(cli=cli, cwd=cwd, snapshot=snapshot, resume=None)
-    async for event in _turn(run=run, prompt=full_prompt, options=options, root=cwd):
+    options = _options(cli=cli, cwd=cwd, resume=None)
+    prompt = f"{snapshot}\n\n{full_prompt}"
+    async for event in _turn(run=run, prompt=prompt, options=options, root=cwd):
         yield event
 
 
-def _options(*, cli: str, cwd: Path, snapshot: str, resume: str | None):
+def _options(*, cli: str, cwd: Path, resume: str | None):
     from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
     return ClaudeAgentOptions(
@@ -303,7 +309,9 @@ def _options(*, cli: str, cwd: Path, snapshot: str, resume: str | None):
         cwd=str(cwd),
         tools=TOOLS,
         allowed_tools=TOOLS,
-        system_prompt={"type": "preset", "preset": "claude_code", "append": f"{SYSTEM_PROMPT}\n\n{snapshot}"},
+        system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_PROMPT},
+        # Prompts carry PR text; don't let "@path" in it attach files or "/cmd" run commands.
+        verbatim_prompts=True,
         setting_sources=["user"],
         include_partial_messages=True,
         resume=resume,

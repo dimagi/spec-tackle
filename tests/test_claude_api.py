@@ -86,6 +86,19 @@ def test_errors_are_saved_in_the_thread(claude_app, monkeypatch):
                                      "body": "This commit is no longer on GitHub."}
 
 
+def test_github_errors_are_not_blamed_on_claude(claude_app, monkeypatch):
+    from spec_tackle.github import GitHubError
+
+    async def denied(pr):
+        raise GitHubError(message="Requires authentication", status=401)
+
+    monkeypatch.setattr(app.state.session.gh, "overview", denied)
+    thread = claude_app.post("/api/pr/o/r/7/claude/threads", json=NEW).json()
+    saved = _wait_idle(claude_app, thread["id"])
+    assert saved["messages"][-1]["role"] == "error"
+    assert saved["messages"][-1]["body"].startswith("Couldn't read the PR from GitHub")
+
+
 def test_create_rejects_path_outside_checkout(claude_app):
     thread = claude_app.post("/api/pr/o/r/7/claude/threads", json={**NEW, "path": "../../etc/passwd"}).json()
     saved = _wait_idle(claude_app, thread["id"])

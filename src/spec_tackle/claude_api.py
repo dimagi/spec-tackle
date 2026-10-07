@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from . import claude, render
 from .checkout import CheckoutError, CommitGone
-from .github import PRRef
+from .github import GitHubError, PRRef
 from .turns import Busy
 
 router = APIRouter()
@@ -87,7 +87,9 @@ async def run_turn(*, state, client, token: str, login: str, thread_id: str, emi
         _fail(store=store, thread_id=thread_id, emit=emit, message=f"Couldn't fetch the repository: {exc}")
     except ValueError as exc:  # anchor path outside the checkout
         _fail(store=store, thread_id=thread_id, emit=emit, message=str(exc))
-    except Exception as exc:  # noqa: BLE001 — any SDK or GitHub failure is shown in the thread
+    except GitHubError as exc:
+        _fail(store=store, thread_id=thread_id, emit=emit, message=f"Couldn't read the PR from GitHub: {exc}")
+    except Exception as exc:  # noqa: BLE001 — any SDK failure is shown in the thread
         _fail(store=store, thread_id=thread_id, emit=emit, message=claude.describe_error(exc))
 
 

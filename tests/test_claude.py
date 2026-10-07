@@ -207,3 +207,5 @@ def test_tool_label(root):
 def test_describe_error_spots_sign_in_problems():
     assert "isn't signed in" in claude.describe_error(RuntimeError("Invalid API key · Please run /login"))
     assert claude.describe_error(RuntimeError("boom")) == "Claude failed: boom"
+    upstream = RuntimeError("authentication failed for upstream")
+    assert claude.describe_error(upstream) == "Claude failed: authentication failed for upstream"
