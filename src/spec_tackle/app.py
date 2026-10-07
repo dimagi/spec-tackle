@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import mimetypes
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -45,7 +46,42 @@ async def lifespan(app: FastAPI):
         app.state.store.close()
 
 
+# Host names (besides IP addresses) the app answers to; `main()` adds the --host value.
+allowed_hosts = {"localhost"}
+
+
+def _host_allowed(header: str) -> bool:
+    host = urlsplit(f"//{header}").hostname or ""
+    if host in allowed_hosts:
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+class HostCheck:
+    """Refuse requests whose Host is a domain name we weren't started with.
+
+    This blocks DNS rebinding: a web page whose domain is pointed at 127.0.0.1 would
+    otherwise count as same-origin and could use the API with the user's GitHub token.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope["headers"])
+            if not _host_allowed(headers.get(b"host", b"").decode("latin-1")):
+                await Response("Unknown host", status_code=421)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(HostCheck)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 app.include_router(claude_api.router)
 

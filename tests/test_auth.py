@@ -90,3 +90,18 @@ def test_session_token_raises_when_signed_out(monkeypatch):
     monkeypatch.setattr(auth, "find_token", lambda: None)
     with pytest.raises(auth.NotSignedIn):
         asyncio.run(auth.Session().token())
+
+
+@pytest.mark.parametrize(
+    "host, status",
+    [
+        ("localhost:8765", 401),
+        ("127.0.0.1:8765", 401),
+        ("[::1]:8765", 401),
+        ("192.168.1.5:8765", 401),
+        ("evil.example:8765", 421),  # a DNS-rebound page
+        ("localhost.evil.example", 421),
+    ],
+)
+def test_only_known_hosts_reach_the_app(signed_out, host, status):
+    assert signed_out.get("/api/pr/o/r/1/activity", headers={"host": host}).status_code == status

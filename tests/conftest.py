@@ -4,11 +4,17 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from spec_tackle import claude_api
+from spec_tackle import app as web, claude_api
 from spec_tackle.app import app
 from spec_tackle.claude import Event
 from spec_tackle.store import Store
 from spec_tackle.turns import TurnRunner
+
+
+@pytest.fixture(autouse=True)
+def allow_test_host(monkeypatch):
+    """TestClient sends `Host: testserver`."""
+    monkeypatch.setattr(web, "allowed_hosts", {"localhost", "testserver"})
 
 
 @pytest.fixture(autouse=True)

@@ -36,6 +36,10 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"spec-tackle: {exc}\n")
 
+    from .app import allowed_hosts
+
+    allowed_hosts.add(args.host.lower())
+
     print(f"spec-tackle → {url}")
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
