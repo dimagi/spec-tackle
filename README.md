@@ -1,5 +1,12 @@
 # spec-tackle
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/spectacles-dark.svg">
+    <img src="docs/spectacles-light.svg" width="370" alt="A pair of spectacles on a page of diff lines; through the lenses the page reads as a clean document">
+  </picture>
+</p>
+
 A reviewer-oriented reading view for GitHub pull requests, built for spec and design-doc PRs.
 
 ```bash
@@ -16,7 +23,7 @@ Opens `http://127.0.0.1:8765`. It authenticates with `GITHUB_TOKEN`/`GH_TOKEN`, 
 - **Comment anywhere**: hover a block and click **+**, or select text and press **c**. Comments post straight to the PR as review comments. If the text didn't change in the PR, GitHub won't accept a line comment there, so the composer says so and posts a file comment that names the lines.
 - **Reply, resolve or reopen** threads. Reply drafts are saved locally.
 - **Light / dark / system theme** toggle in the top bar (defaults to light, remembered per browser).
-- **Live**: the page checks GitHub every 60 seconds. New comments are flagged and announced, and the tab title shows an unread count. You're told when new commits land.
+- **Live**: the page checks GitHub every 30 seconds. New comments are flagged and announced, and the tab title shows an unread count. You're told when new commits land.
 - **Reviewer tools**: Open/All filter, hide bot comments, open-thread counts per section, `j`/`k` to jump between open threads, and a **Finish review** button (Comment / Approve / Request changes).
 - **Modified specs**: changed blocks get a green marker, with a **Document ↔ Changes** toggle.
 
