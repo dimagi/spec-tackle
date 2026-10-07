@@ -147,9 +147,10 @@ The question's anchor (path, line range, and the text of those lines) goes into 
 - `system_prompt`: the Claude Code preset, with appended text saying:
   - Claude is helping a reviewer understand this PR;
   - the working directory is the repo at the PR's commit;
-  - Claude must not suggest edits as if it can make them;
+  - Claude must not suggest edits as if it can make them.
 
-  followed by the snapshot.
+  The snapshot is not in the system prompt. The SDK passes the system prompt to the CLI as a single command-line argument, which Linux limits to 128 KiB, so a large PR would stop every turn from starting. Instead, the first message of each new session (a first question, or the replay after an expired session) starts with the snapshot. A resumed session already has it, so a follow-up sends only the question.
+- `verbatim_prompts=True`: Claude Code delivers each prompt exactly as written, without expanding `@path` mentions or running slash commands. Prompts include text from the PR (anchor lines, earlier answers), and an `@~/...` mention in that text would otherwise attach a local file without any tool call, so the PreToolUse hook would never see it. This needs Claude Code 2.1.248 or later; the SDK warns when the CLI is older.
 - `tools=["Read", "Grep", "Glob"]`: removes every other built-in tool.
 - `allowed_tools=["Read", "Grep", "Glob"]`.
 - `permission_mode="default"`.
