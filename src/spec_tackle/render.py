@@ -296,6 +296,7 @@ def normalize_activity(data: dict) -> dict:
             {
                 "id": c["databaseId"],
                 "author": _person(c["author"]),
+                "body": c.get("body") or "",
                 "bodyHTML": c["bodyHTML"],
                 "createdAt": c["createdAt"],
                 "url": c["url"],
@@ -326,6 +327,7 @@ def normalize_activity(data: dict) -> dict:
             "kind": "comment",
             "id": c["databaseId"],
             "author": _person(c["author"]),
+            "body": c.get("body") or "",
             "bodyHTML": c["bodyHTML"],
             "createdAt": c["createdAt"],
             "url": c["url"],
@@ -342,6 +344,7 @@ def normalize_activity(data: dict) -> dict:
                 "id": review["databaseId"],
                 "state": review["state"],
                 "author": _person(review["author"]),
+                "body": (review.get("body") or "") if has_body else "",
                 "bodyHTML": review["bodyHTML"] if has_body else "",
                 "createdAt": review["submittedAt"],
                 "url": review["url"],

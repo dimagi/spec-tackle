@@ -69,15 +69,15 @@ _ACTIVITY_FIELDS = f"""
       id isResolved isOutdated path line startLine originalLine originalStartLine
       diffSide subjectType resolvedBy {{ login }}
       comments(first: 100) {{
-        nodes {{ id databaseId {_AUTHOR} bodyHTML createdAt url replyTo {{ databaseId }} }}
+        nodes {{ id databaseId {_AUTHOR} body bodyHTML createdAt url replyTo {{ databaseId }} }}
       }}
     }}
   }}
   comments(first: 100) {{
-    nodes {{ databaseId {_AUTHOR} bodyHTML createdAt url }}
+    nodes {{ databaseId {_AUTHOR} body bodyHTML createdAt url }}
   }}
   reviews(first: 100) {{
-    nodes {{ databaseId state {_AUTHOR} bodyHTML submittedAt url }}
+    nodes {{ databaseId state {_AUTHOR} body bodyHTML submittedAt url }}
   }}
 """
 
@@ -95,7 +95,7 @@ query($owner: String!, $repo: String!, $number: Int!) {{
   viewer {{ login avatarUrl }}
   repository(owner: $owner, name: $repo) {{
     pullRequest(number: $number) {{
-      title number url bodyHTML createdAt updatedAt
+      title number url body bodyHTML createdAt updatedAt
       baseRefName headRefName additions deletions changedFiles reviewDecision
       {_AUTHOR}
       {_ACTIVITY_FIELDS}
@@ -107,6 +107,7 @@ query($owner: String!, $repo: String!, $number: Int!) {{
 
 class GitHub:
     def __init__(self, token: str):
+        self.token = token
         self._client = httpx.AsyncClient(
             base_url=API,
             timeout=30,

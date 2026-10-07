@@ -137,3 +137,34 @@ def test_inline_code_can_break_after_slashes_and_dots():
     html = _render("Call `/api/c/<id>` or `a.b`.\n")
     assert "<code>/<wbr>api/<wbr>c/<wbr>&lt;id&gt;</code>" in html
     assert "<code>a.<wbr>b</code>" in html
+
+
+def _activity_payload():
+    author = {"__typename": "User", "login": "ann", "avatarUrl": ""}
+    comment = {"databaseId": 1, "author": author, "body": "**hi**", "bodyHTML": "<b>hi</b>",
+               "createdAt": "2026-01-01T00:00:00Z", "url": "u", "replyTo": None}
+    return {
+        "headRefOid": "abc", "state": "OPEN", "isDraft": False, "merged": False,
+        "viewer": {"login": "me", "avatarUrl": ""},
+        "reviewThreads": {"nodes": [{
+            "id": "T1", "isResolved": False, "isOutdated": False, "path": "a.md", "line": 3,
+            "startLine": None, "originalLine": 3, "originalStartLine": None, "diffSide": "RIGHT",
+            "subjectType": "LINE", "resolvedBy": None, "comments": {"nodes": [comment]},
+        }]},
+        "comments": {"nodes": [{"databaseId": 2, "author": author, "body": "general",
+                                "bodyHTML": "<p>general</p>", "createdAt": "2026-01-02T00:00:00Z", "url": "u"}]},
+        "reviews": {"nodes": [{"databaseId": 3, "state": "COMMENTED", "author": author, "body": "lgtm",
+                               "bodyHTML": "<p>lgtm</p>", "submittedAt": "2026-01-03T00:00:00Z", "url": "u"}]},
+    }
+
+
+def test_normalize_activity_keeps_markdown_bodies():
+    activity = render.normalize_activity(_activity_payload())
+    assert activity["threads"][0]["comments"][0]["body"] == "**hi**"
+    assert [c["body"] for c in activity["conversation"]] == ["general", "lgtm"]
+
+
+def test_queries_ask_for_markdown_bodies():
+    from spec_tackle import github
+    assert "body bodyHTML" in github._ACTIVITY_FIELDS
+    assert "url body bodyHTML" in github._OVERVIEW_QUERY
