@@ -293,7 +293,7 @@
   /** Fade out very long comments (bot reviews!) behind a "Show more". */
   function clampBodies() {
     requestAnimationFrame(() => {
-      for (const body of $$(".comment-body:not([data-measured])", margin)) {
+      for (const body of $$(".thread-card:not(.claude) .comment-body:not([data-measured])", margin)) {
         if (!body.offsetParent) continue; // hidden card — measure when it shows
         body.dataset.measured = "1";
         const id = +body.closest(".comment").dataset.comment;
