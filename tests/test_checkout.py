@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from spec_tackle import checkout
-from spec_tackle.checkout import Checkouts, CommitGone, git_env
+from spec_tackle.checkout import CheckoutError, Checkouts, CommitGone, git_env
 
 TOKEN = "ghp_secret_token_value"
 
@@ -103,3 +103,16 @@ def test_git_env_sends_basic_auth_header_for_github_only():
     # base64("x-access-token:abc")
     assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Basic eC1hY2Nlc3MtdG9rZW46YWJj"
     assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_rejects_unsafe_repo_names(checkouts, origin):
+    sha = _head(origin)
+    for bad in ("..", ".", "a/b", ""):
+        with pytest.raises(CheckoutError):
+            asyncio.run(checkouts.worktree(owner=bad, repo="r", sha=sha, token=TOKEN))
+        with pytest.raises(CheckoutError):
+            asyncio.run(checkouts.worktree(owner="o", repo=bad, sha=sha, token=TOKEN))
+        with pytest.raises(CheckoutError):
+            checkouts.has_clone(owner="o", repo=bad)
+    path = asyncio.run(checkouts.worktree(owner="my-org", repo="my_repo.v2", sha=sha, token=TOKEN))
+    assert (path / "spec.md").exists()
