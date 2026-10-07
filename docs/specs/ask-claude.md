@@ -104,11 +104,13 @@ As a user without Claude Code, I don't want to see controls that can't work.
   3. Run `git worktree add --detach <dir> <sha>`.
 - `async def worktree(pr: PRRef, sha: str, token: str) -> Path` is idempotent. A per-repo `asyncio.Lock` serialises clones, fetches and worktree adds for the same repo.
 - **Token handling.** The token is passed only through environment variables on each git call:
-  - `GIT_CONFIG_COUNT=1`
+  - `GIT_CONFIG_COUNT=2`
   - `GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader`
   - `GIT_CONFIG_VALUE_0=Authorization: Basic <base64("x-access-token:" + token)>`
+  - `GIT_CONFIG_KEY_1=core.symlinks`
+  - `GIT_CONFIG_VALUE_1=false`
 
-  It never appears in process arguments (which `ps` shows), in `config` files, or in error text. `Session` gets a public `async def token() -> str` method; today the token is only held privately.
+  The token travels only in `KEY_0` / `VALUE_0`; the second pair holds no secret. The token never appears in process arguments (which `ps` shows), in `config` files, or in error text. `Session` gets a public `async def token() -> str` method; today the token is only held privately.
 - **Commit no longer on GitHub.** After a force-push, an old commit may not be fetchable. Then `worktree()` raises `CommitGone`, and the thread shows: "This commit is no longer on GitHub (the branch was probably force-pushed). Start a new question to ask about the current version."
 - git runs through `asyncio.create_subprocess_exec`. Any other failure raises `CheckoutError` with git's stderr.
 - No automatic cleanup. Worktrees are cheap with a blob-filtered clone. Out of scope: a `spec-tackle --clean` command, to add later if disk use becomes a problem.
