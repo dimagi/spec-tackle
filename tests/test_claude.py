@@ -27,6 +27,9 @@ def root(tmp_path):
     ("/etc/passwd", False),
     ("link", False),            # symlink pointing outside
     ("docs/../../secret", False),
+    ("~", False),
+    ("~/x", False),
+    ("~/.ssh/id_rsa", False),
 ])
 def test_inside(root, target, ok):
     assert claude.inside(root=root, target=target.format(root=root)) is ok
@@ -49,8 +52,27 @@ def test_guard_denies_outside_paths_and_other_tools(root):
         _hook(root, "Read", file_path=str(root / "link")),
         _hook(root, "Glob", pattern="*", path=".."),
         _hook(root, "Bash", command="ls"),
+        _hook(root, "Read", file_path="~/.ssh/id_rsa"),
+        _hook(root, "Grep", pattern="x", path="~"),
+        _hook(root, "Grep", pattern="x", file_path=str(root), path="/etc"),  # mismatched keys
+        _hook(root, "Read", file_path="../secret"),  # relative, resolved against cwd
+        _hook(root, "Read", file_path="a\x00b"),
+        _hook(root, "Read", file_path=123),
+        _hook(root, "Grep", pattern="x", path=["/etc"]),
+        _hook(root, "Glob", pattern="/etc/*"),
+        _hook(root, "Glob", pattern="../../**/*"),
+        _hook(root, "Glob", pattern="docs/../../*"),
+        _hook(root, "Glob", pattern="~/*"),
+        _hook(root, "Grep", pattern="x", glob="/etc/*"),
+        _hook(root, "Grep", pattern="x", glob="../**"),
     ):
         assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_guard_allows_relative_paths_and_patterns_inside(root):
+    assert _hook(root, "Read", file_path="docs/a.md") == {}
+    assert _hook(root, "Glob", pattern="**/*.md") == {}
+    assert _hook(root, "Grep", pattern="x", glob="*.md", path="docs") == {}
 
 
 # -- snapshot ----------------------------------------------------------------

@@ -31,9 +31,12 @@ def git_env(token: str) -> dict[str, str]:
     return {
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
-        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_COUNT": "2",
         "GIT_CONFIG_KEY_0": "http.https://github.com/.extraHeader",
         "GIT_CONFIG_VALUE_0": f"Authorization: Basic {header}",
+        # Check symlinks out as plain files so Claude's file walks can't follow them out.
+        "GIT_CONFIG_KEY_1": "core.symlinks",
+        "GIT_CONFIG_VALUE_1": "false",
     }
 
 

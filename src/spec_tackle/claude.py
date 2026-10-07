@@ -38,9 +38,39 @@ def sdk_installed() -> bool:
 
 def inside(*, root: Path, target: str, base: str | None = None) -> bool:
     """True when `target` (relative to `base`, default `root`) resolves inside `root`."""
+    # Relative targets resolve against the hook's `cwd`, which the SDK call sets to the worktree.
+    if target.startswith("~"):  # Claude Code expands "~" to the home directory
+        return False
     real_root = os.path.realpath(root)
     real = os.path.realpath(os.path.join(base or real_root, target))
     return real == real_root or real.startswith(real_root + os.sep)
+
+
+def _pattern_ok(pattern: str) -> bool:
+    """True unless the glob is absolute, starts with "~", or has a ".." segment."""
+    return not (
+        pattern.startswith(("/", "~", "\\"))
+        or ".." in pattern.replace("\\", "/").split("/")
+        or os.path.isabs(pattern)
+    )
+
+
+def _allowed(*, root: Path, input_data: dict) -> bool:
+    tool = input_data.get("tool_name")
+    tool_input = input_data.get("tool_input") or {}
+    if tool not in TOOLS:
+        return False
+    paths = [tool_input[k] for k in ("file_path", "path", "notebook_path") if k in tool_input]
+    if not paths:
+        paths = ["."]
+    if not all(isinstance(p, str) and inside(root=root, target=p, base=input_data.get("cwd")) for p in paths):
+        return False
+    for key in ("pattern", "glob"):
+        if (tool, key) in (("Glob", "pattern"), ("Grep", "glob")) and key in tool_input:
+            value = tool_input[key]
+            if not isinstance(value, str) or not _pattern_ok(value):
+                return False
+    return True
 
 
 def make_guard(root: Path):
@@ -48,10 +78,11 @@ def make_guard(root: Path):
 
     # The SDK calls hook callbacks positionally, so these parameters can't be keyword-only.
     async def guard(input_data: dict, tool_use_id: str | None, context) -> dict:
-        tool = input_data.get("tool_name")
-        tool_input = input_data.get("tool_input") or {}
-        target = tool_input.get("file_path") or tool_input.get("path") or "."
-        if tool in TOOLS and inside(root=root, target=target, base=input_data.get("cwd")):
+        try:
+            allowed = _allowed(root=root, input_data=input_data)
+        except Exception:  # anything unexpected in the input is a denial
+            allowed = False
+        if allowed:
             return {}
         return {
             "hookSpecificOutput": {
