@@ -69,6 +69,8 @@ def test_options_lock_claude_down(tmp_path):
     assert options.cwd == str(tmp_path)
     assert options.tools == ["Read", "Grep", "Glob"] == options.allowed_tools
     assert options.setting_sources == ["user"]
+    assert options.strict_mcp_config is True
+    assert options.mcp_servers == {}
     assert options.include_partial_messages is True
     assert options.resume is None
     assert options.system_prompt["preset"] == "claude_code"

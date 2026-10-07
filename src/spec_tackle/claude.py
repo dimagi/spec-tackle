@@ -313,6 +313,8 @@ def _options(*, cli: str, cwd: Path, resume: str | None):
         # Prompts carry PR text; don't let "@path" in it attach files or "/cmd" run commands.
         verbatim_prompts=True,
         setting_sources=["user"],
+        # Never start MCP servers, e.g. from a `.mcp.json` committed to the reviewed repo.
+        strict_mcp_config=True,
         include_partial_messages=True,
         resume=resume,
         hooks={"PreToolUse": [HookMatcher(hooks=[make_guard(cwd)])]},
