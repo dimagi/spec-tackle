@@ -53,11 +53,12 @@ _PATH_IN_CLASS = re.compile(r"\[[^\]]*[./~]")  # e.g. "[.][.]/*"
 
 
 def _pattern_ok(*, root: Path, pattern: str, base: str | None) -> bool:
-    """True when the glob can't reach outside `root`.
+    """True when the glob's search can't start outside `root`.
 
-    The search starts at the literal directory before the first wildcard, so that
-    directory must be inside `root`. Anything that could hide a "..", "~" or an
-    absolute path inside glob syntax is refused.
+    The search starts at the literal directory before the first wildcard, resolved
+    against `base`, so that directory must be inside `root`. Syntax that could hide a
+    "..", "~" or an absolute path is refused, including negated classes like `[!.]*`
+    (refused by design). Wildcards that merely match ".." only filter within the root.
     """
     if ".." in pattern or "~" in pattern or "\\" in pattern:
         return False
@@ -78,10 +79,13 @@ def _allowed(*, root: Path, input_data: dict) -> bool:
     paths = [tool_input[k] for k in keys if tool_input.get(k) is not None] or ["."]
     if not all(isinstance(p, str) and inside(root=root, target=p, base=cwd) for p in paths):
         return False
+    search_path = tool_input.get("path")
+    # The search is rooted at `path` (when given), not at the hook's cwd.
+    base = os.path.join(cwd or str(root), search_path) if isinstance(search_path, str) else cwd
     for key in ("pattern", "glob"):
         if (tool, key) in (("Glob", "pattern"), ("Grep", "glob")) and tool_input.get(key) is not None:
             value = tool_input[key]
-            if not isinstance(value, str) or not _pattern_ok(root=root, pattern=value, base=cwd):
+            if not isinstance(value, str) or not _pattern_ok(root=root, pattern=value, base=base):
                 return False
     return True
 

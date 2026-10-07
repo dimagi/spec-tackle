@@ -16,6 +16,8 @@ def root(tmp_path):
     (wt / "docs" / "a.md").write_text("one\ntwo\nthree\nfour\n")
     (tmp_path / "secret").write_text("nope")
     os.symlink(tmp_path / "secret", wt / "link")
+    (tmp_path / "outside").mkdir()
+    os.symlink(tmp_path / "outside", wt / "docs" / "link")
     return wt
 
 
@@ -79,8 +81,17 @@ def test_guard_denies_outside_paths_and_other_tools(root):
 def test_guard_resolves_relative_paths_against_cwd(root):
     docs = root / "docs"
     assert _hook(root, "Read", cwd=docs, file_path="a.md") == {}
-    assert _hook(root, "Read", cwd=docs, file_path="../../secret")["hookSpecificOutput"]
+    denied = _hook(root, "Read", cwd=docs, file_path="../../secret")
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert _hook(root, "Read", cwd=docs, file_path="../docs/a.md") == {}
+
+
+def test_guard_resolves_pattern_prefix_against_search_path(root):
+    denied = _hook(root, "Glob", path="docs", pattern="link/*")  # docs/link -> outside the root
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    denied = _hook(root, "Grep", pattern="x", path="docs", glob="link/*")
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert _hook(root, "Glob", path="docs", pattern="*.md") == {}
 
 
 def test_guard_treats_none_paths_as_absent(root):
