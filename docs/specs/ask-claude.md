@@ -1,5 +1,7 @@
 # Ask Claude
 
+**Status:** Implemented on branch `feat/ask-claude`, in review.
+
 ## Goal
 
 While reading a PR, you can ask Claude a question about a line or a selection, in the same way you start a comment. Claude answers with everything as context: the PR description, the diff, every review thread and conversation comment, and read-only access to the repository at the PR's commit. That lets it check a spec against the existing code.

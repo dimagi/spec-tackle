@@ -1,5 +1,7 @@
 # Recent PRs
 
+**Status:** Not started. The shared store (`store.py`) and its `recent_prs` table already exist, added for Ask Claude; the recording, routes and home page list remain.
+
 ## Goal
 
 The home page lists the PRs you opened before, and the list survives a restart of spec-tackle. Today nothing is stored, so after a restart you have to find and paste each PR link again.
