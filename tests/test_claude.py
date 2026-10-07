@@ -35,9 +35,14 @@ def test_inside(root, target, ok):
     assert claude.inside(root=root, target=target.format(root=root)) is ok
 
 
-def _hook(root, tool, **tool_input):
+BAD_PATTERNS = ["{..,x}/*", "{/etc,x}/*", "{~,x}/*", "[.][.]/*", "@(..)/*", "x/{..,y}",
+                "/etc/*", "../*", "~/*", "docs\\..\\*"]
+GOOD_PATTERNS = ["**/*.md", "*.{md,py}", "docs/**/*.md", "src/[a-z]*.py", "docs/*"]
+
+
+def _hook(root, tool, cwd=None, **tool_input):
     guard = claude.make_guard(root)
-    data = {"tool_name": tool, "tool_input": tool_input, "cwd": str(root)}
+    data = {"tool_name": tool, "tool_input": tool_input, "cwd": str(cwd or root)}
     return asyncio.run(guard(data, "id", None))
 
 
@@ -65,8 +70,28 @@ def test_guard_denies_outside_paths_and_other_tools(root):
         _hook(root, "Glob", pattern="~/*"),
         _hook(root, "Grep", pattern="x", glob="/etc/*"),
         _hook(root, "Grep", pattern="x", glob="../**"),
+        *[_hook(root, "Glob", pattern=bad) for bad in BAD_PATTERNS],
+        *[_hook(root, "Grep", pattern="x", glob=bad) for bad in BAD_PATTERNS],
     ):
         assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_guard_resolves_relative_paths_against_cwd(root):
+    docs = root / "docs"
+    assert _hook(root, "Read", cwd=docs, file_path="a.md") == {}
+    assert _hook(root, "Read", cwd=docs, file_path="../../secret")["hookSpecificOutput"]
+    assert _hook(root, "Read", cwd=docs, file_path="../docs/a.md") == {}
+
+
+def test_guard_treats_none_paths_as_absent(root):
+    assert _hook(root, "Grep", pattern="x", path=None, file_path=None, notebook_path=None) == {}
+    assert _hook(root, "Glob", pattern="*.md", path=None) == {}
+
+
+def test_guard_allows_normal_patterns(root):
+    for good in GOOD_PATTERNS:
+        assert _hook(root, "Glob", pattern=good) == {}, good
+        assert _hook(root, "Grep", pattern="x", glob=good) == {}, good
 
 
 def test_guard_allows_relative_paths_and_patterns_inside(root):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -38,37 +39,49 @@ def sdk_installed() -> bool:
 
 def inside(*, root: Path, target: str, base: str | None = None) -> bool:
     """True when `target` (relative to `base`, default `root`) resolves inside `root`."""
-    # Relative targets resolve against the hook's `cwd`, which the SDK call sets to the worktree.
     if target.startswith("~"):  # Claude Code expands "~" to the home directory
         return False
     real_root = os.path.realpath(root)
+    # Relative targets resolve against the hook's `cwd`, which the SDK call sets to the worktree.
     real = os.path.realpath(os.path.join(base or real_root, target))
     return real == real_root or real.startswith(real_root + os.sep)
 
 
-def _pattern_ok(pattern: str) -> bool:
-    """True unless the glob is absolute, starts with "~", or has a ".." segment."""
-    return not (
-        pattern.startswith(("/", "~", "\\"))
-        or ".." in pattern.replace("\\", "/").split("/")
-        or os.path.isabs(pattern)
-    )
+_GLOB_META = re.compile(r"[*?\[\]{}()!+@]")
+_ABSOLUTE_ALTERNATIVE = re.compile(r"[{(,|]/")  # e.g. "{/etc,x}/*"
+_PATH_IN_CLASS = re.compile(r"\[[^\]]*[./~]")  # e.g. "[.][.]/*"
+
+
+def _pattern_ok(*, root: Path, pattern: str, base: str | None) -> bool:
+    """True when the glob can't reach outside `root`.
+
+    The search starts at the literal directory before the first wildcard, so that
+    directory must be inside `root`. Anything that could hide a "..", "~" or an
+    absolute path inside glob syntax is refused.
+    """
+    if ".." in pattern or "~" in pattern or "\\" in pattern:
+        return False
+    if _ABSOLUTE_ALTERNATIVE.search(pattern) or _PATH_IN_CLASS.search(pattern):
+        return False
+    prefix = _GLOB_META.split(pattern, maxsplit=1)[0]
+    directory = prefix[: prefix.rfind("/") + 1] or "."
+    return inside(root=root, target=directory, base=base)
 
 
 def _allowed(*, root: Path, input_data: dict) -> bool:
     tool = input_data.get("tool_name")
     tool_input = input_data.get("tool_input") or {}
+    cwd = input_data.get("cwd")
     if tool not in TOOLS:
         return False
-    paths = [tool_input[k] for k in ("file_path", "path", "notebook_path") if k in tool_input]
-    if not paths:
-        paths = ["."]
-    if not all(isinstance(p, str) and inside(root=root, target=p, base=input_data.get("cwd")) for p in paths):
+    keys = ("file_path", "path", "notebook_path")
+    paths = [tool_input[k] for k in keys if tool_input.get(k) is not None] or ["."]
+    if not all(isinstance(p, str) and inside(root=root, target=p, base=cwd) for p in paths):
         return False
     for key in ("pattern", "glob"):
-        if (tool, key) in (("Glob", "pattern"), ("Grep", "glob")) and key in tool_input:
+        if (tool, key) in (("Glob", "pattern"), ("Grep", "glob")) and tool_input.get(key) is not None:
             value = tool_input[key]
-            if not isinstance(value, str) or not _pattern_ok(value):
+            if not isinstance(value, str) or not _pattern_ok(root=root, pattern=value, base=cwd):
                 return False
     return True
 
