@@ -12,7 +12,7 @@ A reviewer-oriented reading view for GitHub pull requests, built for spec and de
 Run it straight from GitHub, no clone needed:
 
 ```bash
-uvx --from git+https://github.com/Charl1996/spec-tackle spec-tackle
+uvx --from git+https://github.com/dimagi/spec-tackle spec-tackle
 ```
 
 uv caches the build. Add `--refresh` to pick up new commits, or append `@<tag>` / `@<commit>` to the URL to pin a version.
