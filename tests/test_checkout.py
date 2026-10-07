@@ -42,6 +42,7 @@ def test_first_question_clones_and_checks_out_the_commit(checkouts, origin):
     path = asyncio.run(checkouts.worktree(owner="o", repo="r", sha=_head(origin), token=TOKEN))
     assert (path / "spec.md").read_text().startswith("# Spec")
     assert checkouts.has_clone(owner="o", repo="r")
+    assert checkouts.root.stat().st_mode & 0o777 == 0o700
 
 
 def test_reuses_clone_and_fetches_new_commits(checkouts, origin):

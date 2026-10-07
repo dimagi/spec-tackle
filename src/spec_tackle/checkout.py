@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from .store import data_dir
+from .store import data_dir, make_private
 
 _GONE_RE = re.compile(r"not our ref|couldn't find remote ref|unadvertised object", re.I)
 
@@ -77,6 +77,7 @@ class Checkouts:
             bare = self._bare(owner=owner, repo=repo)
             env = git_env(token)
             if not self.has_clone(owner=owner, repo=repo):
+                make_private(self.root)
                 bare.parent.mkdir(parents=True, exist_ok=True)
                 await self._git(
                     "clone", "--bare", "--filter=blob:none", self._remote(owner, repo), str(bare),

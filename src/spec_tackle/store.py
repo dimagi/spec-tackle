@@ -48,6 +48,15 @@ def data_dir() -> Path:
     return Path(base) / "spec-tackle"
 
 
+def make_private(path: Path) -> None:
+    """Create `path` if needed and make it readable only by this user.
+
+    It holds private questions, answers and clones of private repos.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    path.chmod(0o700)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -58,8 +67,10 @@ class Store:
 
     @classmethod
     def open(cls, path: Path | None = None) -> Store:
-        path = path or data_dir() / "state.db"
         try:
+            if path is None:
+                make_private(data_dir())
+                path = data_dir() / "state.db"
             path.parent.mkdir(parents=True, exist_ok=True)
             # One connection, used only from the event loop thread at a time.
             conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
@@ -69,7 +80,7 @@ class Store:
             for number, sql in enumerate(_MIGRATIONS[version:], start=version + 1):
                 conn.executescript(f"BEGIN; {sql} PRAGMA user_version = {number}; COMMIT;")
         except (OSError, sqlite3.Error) as exc:
-            raise StoreError(f"Can't open {path}: {exc}") from exc
+            raise StoreError(f"Can't open {path or data_dir()}: {exc}") from exc
         return cls(conn)
 
     def close(self) -> None:

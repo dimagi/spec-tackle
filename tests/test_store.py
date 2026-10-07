@@ -25,6 +25,12 @@ def test_default_location_follows_xdg_data_home(isolated_data_home):
     assert (isolated_data_home / "spec-tackle" / "state.db").exists()
 
 
+def test_default_location_is_private(isolated_data_home):
+    (isolated_data_home / "spec-tackle").mkdir(parents=True, mode=0o755)
+    Store.open().close()
+    assert (isolated_data_home / "spec-tackle").stat().st_mode & 0o777 == 0o700
+
+
 def test_thread_round_trip(store):
     thread_id = _new_thread(store)
     store.add_message(thread_id=thread_id, role="user", body="Why?")
