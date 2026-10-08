@@ -28,6 +28,28 @@ export type MapNode = {
 
 export type MapEdge = { from: string; to: string; symbols: string[] };
 
+export type ChangeKind = "function" | "method" | "class" | "attribute" | "module" | "file" | "caller";
+export type ChangeNode = {
+  id: string; // "path::qualname"
+  file: string;
+  label: string;
+  kind: ChangeKind;
+  change: "added" | "modified" | "removed" | "moved" | "caller";
+  signatureChanged: boolean;
+  additions: number;
+  deletions: number;
+  lines: [number, number] | null;
+  baseLines: [number, number] | null;
+  from?: { file: string; name: string };
+};
+export type ChangeEdgeType = "uses" | "probable" | "breaks-signature" | "breaks-removed" | "replaced" | "tests";
+export type ChangeEdge = { from: string; to: string; type: ChangeEdgeType; line: number };
+export type Changes = {
+  nodes: ChangeNode[];
+  edges: ChangeEdge[];
+  readingPath: { phase: Phase | "check"; ids: string[] }[];
+};
+
 export type PRMap = {
   status: "ready";
   headSha: string;
@@ -36,6 +58,7 @@ export type PRMap = {
   readingPath: { phase: Phase; files: string[] }[];
   limits: { importGraph: boolean; graphTruncated: boolean; baseMissing: boolean };
   skipped: { path: string; reason: string }[];
+  changes?: Changes;
 };
 
 type MapResponse = PRMap | { status: "pending"; headSha: string } | { status: "error"; message: string; headSha: string };
