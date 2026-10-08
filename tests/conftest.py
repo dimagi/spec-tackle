@@ -52,6 +52,9 @@ class FakeGitHub:
         return [{"filename": "docs/a.md", "status": "added", "additions": 4, "deletions": 0,
                  "patch": "@@ -0,0 +1,4 @@\n+one\n+two\n+three\n+four"}]
 
+    async def raw_file(self, owner, repo, path, ref):
+        return b"# Title\n\ntwo\nthree\n"
+
 
 class FakeSession:
     def __init__(self, login="me"):
@@ -123,4 +126,13 @@ def claude_app(tmp_path, monkeypatch):
         app.state.checkouts = FakeCheckouts(tmp_path / "wt")
         app.state.turns = TurnRunner()
         client.fake_ask = fake_ask
+        yield client
+
+
+@pytest.fixture
+def web_app(tmp_path):
+    """A TestClient signed in with a fake GitHub; Claude is off."""
+    with TestClient(app) as client:
+        app.state.session = FakeSession()
+        app.state.claude_cli = None
         yield client

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import mimetypes
 import sys
@@ -16,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from . import claude, claude_api, render
+from . import claude, claude_api, pages, render
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
 from .github import GitHub, GitHubError, PRRef, parse_pr_url
@@ -138,45 +137,8 @@ async def index(request: Request, url: str | None = None, next: str | None = Non
 @app.get("/pr/{owner}/{repo}/{number}", response_class=HTMLResponse)
 async def review_page(request: Request, owner: str, repo: str, number: int):
     pr = PRRef(owner, repo, number)
-    client = await gh(request)
-    overview, files = await asyncio.gather(client.overview(pr), client.files(pr))
-    head = overview["headRefOid"]
-
-    async def build(file: dict) -> dict:
-        path = file["filename"]
-        hunks, added = render.parse_patch(file.get("patch"))
-        entry = {
-            "path": path,
-            "status": file["status"],
-            "additions": file["additions"],
-            "deletions": file["deletions"],
-            "hunks": hunks,
-            "wholeFile": file["status"] == "added",
-            "markdown": render.is_markdown(path),
-            "rendered": None,
-            "diff": render.render_diff(file["patch"], path) if file.get("patch") else None,
-            "outline": [],
-            "githubUrl": f"{overview['url']}/files",
-        }
-        if entry["markdown"] and file["status"] != "removed":
-            text = (await client.raw_file(owner, repo, path, head)).decode("utf-8", "replace")
-            html = render.render_markdown(
-                text,
-                path=path,
-                raw_base=f"/raw/{owner}/{repo}/{head}",
-                blob_base=f"https://github.com/{owner}/{repo}/blob/{head}",
-                # In a brand-new file every line is "added"; highlighting it all is noise.
-                added_lines=set() if entry["wholeFile"] else added,
-            )
-            entry["rendered"] = html
-            entry["outline"] = render.outline(html)
-        return entry
-
-    built = await asyncio.gather(*(build(f) for f in files))
-    # Specs first: rendered markdown is what reviewers came for.
-    built.sort(key=lambda f: (not f["rendered"], f["path"]))
-
-    activity = render.normalize_activity(overview)
+    page = await pages.build_page(await gh(request), pr)
+    overview, built, activity = page["overview"], page["files"], page["activity"]
     client_files = {
         f["path"]: {"hunks": f["hunks"], "wholeFile": f["wholeFile"], "markdown": f["markdown"]}
         for f in built
@@ -255,6 +217,17 @@ async def activity(request: Request, owner: str, repo: str, number: int):
     client = await gh(request)
     data = await client.activity(PRRef(owner, repo, number))
     return render.normalize_activity(data)
+
+
+@app.get("/api/pr/{owner}/{repo}/{number}/page")
+async def page_data(request: Request, owner: str, repo: str, number: int):
+    page = await pages.build_page(await gh(request), PRRef(owner, repo, number))
+    return {
+        **page,
+        "overview": pages.public_overview(page["overview"]),
+        "viewer": await session(request).viewer(),
+        "claude": bool(request.app.state.claude_cli),
+    }
 
 
 @app.post("/api/pr/{owner}/{repo}/{number}/comments")
