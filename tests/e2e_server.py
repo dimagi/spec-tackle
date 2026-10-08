@@ -28,6 +28,7 @@ HEAD = "e2e0000headsha"
 DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff.\n\n## Limits\n\nAt most five tries.\n"
 ME = {"__typename": "User", "login": "me", "avatarUrl": ""}
 ANN = {"__typename": "User", "login": "ann", "avatarUrl": ""}
+TITLES = {7: "Retry failed form submissions", 8: "Rename the sync queue"}
 ids = itertools.count(1000)
 
 
@@ -59,7 +60,8 @@ class FakeGitHub:
                 "reviews": {"nodes": self.reviews}}
 
     async def overview(self, pr):
-        return {"title": "Retry failed form submissions", "number": 7, "url": "https://github.com/o/r/pull/7",
+        return {"title": TITLES.get(pr.number, f"PR {pr.number}"), "number": pr.number,
+                "url": f"https://github.com/o/r/pull/{pr.number}",
                 "body": "Adds retries.", "bodyHTML": "<p>Adds retries.</p>", "author": ANN, "createdAt": "2026-10-08T08:00:00Z",
                 "updatedAt": "", "baseRefName": "main", "headRefName": "retry", "additions": 9, "deletions": 0,
                 "changedFiles": 1, "reviewDecision": None, **self._activity()}
@@ -100,6 +102,10 @@ class FakeGitHub:
         state = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(event, "COMMENTED")
         self.reviews.append({**r, "state": state, "submittedAt": r["createdAt"]})
         return {"id": r["databaseId"]}
+
+    async def review_requests(self):
+        return [{"owner": "o", "repo": "r", "number": 8, "title": TITLES[8], "author": "ann",
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]
 
     async def set_thread_resolved(self, thread_id, resolved):
         for t in self.threads:
