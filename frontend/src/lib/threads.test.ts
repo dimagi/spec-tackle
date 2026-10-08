@@ -1,5 +1,5 @@
 import type { PageFile, Thread } from "../api/types";
-import { commentableRange, isCollapsible, isShown, quoteFor, rangeLabel, threadRange } from "./threads";
+import { commentableRange, headingCounts, isCollapsible, isShown, quoteFor, rangeLabel, threadRange } from "./threads";
 
 const person = (isBot = false) => ({ login: isBot ? "ci[bot]" : "ann", avatarUrl: "", isBot });
 const thread = (over: Partial<Thread> = {}): Thread => ({
@@ -53,4 +53,24 @@ test("filters hide resolved threads and bots", () => {
 test("quoteFor turns a selection into a markdown quote", () => {
   expect(quoteFor("one\n\ntwo")).toBe("> one\n> two\n\n");
   expect(quoteFor(null)).toBe("");
+});
+
+test("headingCounts counts open, shown threads under each heading until the next", () => {
+  const f = file({
+    outline: [
+      { level: 1, line: 1, id: "a", text: "A" },
+      { level: 2, line: 10, id: "b", text: "B" },
+    ],
+  });
+  const threads = [
+    thread({ id: "1", line: 5, startLine: null }),
+    thread({ id: "2", line: 12, startLine: null }),
+    thread({ id: "3", line: 15, startLine: null, isResolved: true }),
+    thread({ id: "4", line: 20, startLine: null, path: "other.md" }),
+  ];
+
+  const counts = headingCounts([f], threads, { filter: "all", hideBots: false });
+
+  expect(counts.get("a.md#a")).toBe(1);
+  expect(counts.get("a.md#b")).toBe(1);
 });

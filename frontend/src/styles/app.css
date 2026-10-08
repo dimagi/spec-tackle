@@ -86,10 +86,9 @@ section.file { container-type: inline-size; }
   --pad: 3.5rem;
   --side: max(var(--pad), (100cqi - 46rem) / 2);
   font-family: "Source Serif 4", Georgia, serif;
-  font-size: 1.125rem;
+  /* font-size and color come from .prose, which won over them in the old CDN cascade. */
   line-height: 1.75;
   padding: 2.5rem var(--side) 3rem;
-  color: var(--ink);
 }
 @media (max-width: 640px) { .doc-body { --pad: 1.25rem; padding-block: 1.5rem; } }
 .gh-body { max-width: 52rem; }

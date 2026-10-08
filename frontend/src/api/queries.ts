@@ -29,6 +29,7 @@ export function useLiveActivity(pr: PRRef, initial: Activity) {
     queryFn: () => request<Activity>("GET", `${apiBase(pr)}/activity`),
     initialData: initial,
     initialDataUpdatedAt: Date.now,
+    staleTime: POLL_MS,
     refetchInterval: POLL_MS,
     refetchIntervalInBackground: true,
   });
