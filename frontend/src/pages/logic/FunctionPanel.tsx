@@ -49,7 +49,7 @@ function Function({ pr, fn, headSha, onShowInReview }: { pr: PRRef; fn: LogicFun
           {fn.inDiff ? (
             <button type="button" className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300"
               onClick={() => onShowInReview(fn.path, firstChange ?? fn.start)}>
-              Show in Review
+              Show in Code view
             </button>
           ) : (
             <a className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300" target="_blank" rel="noopener"

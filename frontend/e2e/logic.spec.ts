@@ -6,7 +6,7 @@ test.beforeEach(async ({ request }) => {
 
 test("generate a logic map, expand it, open a function and jump to it in Review", async ({ page }) => {
   await page.goto("/pr/o/r/7");
-  await page.getByRole("tab", { name: "Logic" }).click();
+  await page.getByRole("tab", { name: "Logic view" }).click();
   await expect(page).toHaveURL(/\?view=logic$/);
 
   await page.getByRole("button", { name: "Generate logic map" }).click();
@@ -21,7 +21,7 @@ test("generate a logic map, expand it, open a function and jump to it in Review"
   await expect(panel.getByText("docs/retry.md:5–5")).toBeVisible();
   await expect(panel.locator(".logic-line.changed")).toContainText("Failures are retried with backoff.");
 
-  await panel.getByRole("button", { name: "Show in Review" }).click();
+  await panel.getByRole("button", { name: "Show in Code view" }).click();
   await expect(page).toHaveURL(/\/pr\/o\/r\/7$/);
   await expect(page.locator("#doc")).toBeVisible();
   await expect(page.locator(".line-flash")).toContainText("Failures are retried with backoff.");
@@ -29,6 +29,6 @@ test("generate a logic map, expand it, open a function and jump to it in Review"
   await expect(page.locator('section.file[data-path="docs/retry.md"] .view[data-view="rendered"]')).toBeVisible();
 
   // Back to Logic: the map and the expanded block are still there.
-  await page.getByRole("tab", { name: "Logic" }).click();
+  await page.getByRole("tab", { name: "Logic view" }).click();
   await expect(chart.getByRole("button", { name: /⊖ Retry failures/ })).toBeVisible();
 });

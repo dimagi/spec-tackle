@@ -19,7 +19,7 @@ sent to GitHub.
 | Question | Decision |
 |---|---|
 | Scope | One map per PR, describing the whole change end to end. It is not per file. |
-| Where | A **Logic** tab next to **Review** in the top bar's page tabs, shown only when Ask Claude is available. |
+| Where | A **Logic view** tab next to **Code view** in the top bar's page tabs, shown only when Ask Claude is available. |
 | Shape | A tree of blocks, at most 3 levels deep and at most 12 blocks per level. Each level is a flowchart with edges between siblings. |
 | Expanding | Clicking a block with children expands it in place as a subgraph. Clicking a leaf opens a side panel with its functions. |
 | Leaf code | Each function's full source from the checkout at the map's commit, with the PR's added or changed lines highlighted. |
@@ -170,8 +170,8 @@ check the guard uses.
   - `path:start–end`;
   - "unchanged by this PR" when the file isn't in the diff, or no lines in the range changed;
   - the source with line numbers, with changed lines highlighted;
-  - **Show in Review**.
-- **Show in Review** switches to the Review tab and scrolls to that file and line, and switches the file to its Changes view when the line is in the diff. It uses the same scrolling as the outline in the left rail.
+  - **Show in Code view**.
+- **Show in Code view** switches to the Code view tab and scrolls to that file and line, and switches the file to its Changes view when the line is in the diff. It uses the same scrolling as the outline in the left rail.
 - Esc or × closes the panel.
 - A function whose file is missing shows the `missing` message in place of its source.
 
@@ -243,7 +243,7 @@ The source endpoint never reads outside the worktree, and only the map's owner c
   - expand and collapse, with persistence;
   - Expand all and Collapse all;
   - a leaf opens the panel, with changed lines highlighted;
-  - Show in Review switches tabs;
+  - Show in Code view switches tabs;
   - Esc closes the panel;
   - a Mermaid failure shows the list fallback.
 - The `?view=logic` tab survives a reload, and switching tabs keeps unsent composer text.
@@ -253,7 +253,7 @@ The source endpoint never reads outside the worktree, and only the map's owner c
 - generate, and see the chart;
 - expand a block, and see its children;
 - click a leaf, and see the source with a highlighted line;
-- Show in Review, and land on that line.
+- Show in Code view, and land on that line.
 
 **Manual:** one run on a real PR on the reviewer's own server, to judge whether the map
 is useful.

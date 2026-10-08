@@ -53,12 +53,12 @@ test("with Claude, the Logic tab swaps views and the review page keeps its state
   const box = document.querySelector<HTMLTextAreaElement>("#conversation textarea")!;
   await userEvent.type(box, "Half a thought");
 
-  await userEvent.click(within(tabs).getByRole("tab", { name: "Logic" }));
+  await userEvent.click(within(tabs).getByRole("tab", { name: "Logic view" }));
   expect(router.state.location.search).toBe("?view=logic");
   expect(await screen.findByRole("button", { name: "Generate logic map" })).toBeVisible();
   expect(document.getElementById("doc")).not.toBeVisible();
 
-  await userEvent.click(within(tabs).getByRole("tab", { name: "Review" }));
+  await userEvent.click(within(tabs).getByRole("tab", { name: "Code view" }));
   expect(router.state.location.search).toBe("");
   expect(document.getElementById("doc")).toBeVisible();
   expect(document.querySelector<HTMLTextAreaElement>("#conversation textarea")!.value).toBe("Half a thought");

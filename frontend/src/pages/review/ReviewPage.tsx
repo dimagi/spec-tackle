@@ -397,7 +397,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         onRefresh={() => live.refresh()}
         onFinishReview={() => setReviewOpen(true)}
         tabs={page.claude && (
-          <PageTabs tabs={[{ id: "review", label: "Review" }, { id: "logic", label: "Logic" }]} active={tab} onSelect={setTab} />
+          <PageTabs tabs={[{ id: "review", label: "Code view" }, { id: "logic", label: "Logic view" }]} active={tab} onSelect={setTab} />
         )}
         switcher={
           <PrSwitcher current={{ ...pr, title: page.overview.title }} open={switcherOpen}

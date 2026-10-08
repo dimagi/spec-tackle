@@ -198,7 +198,7 @@ test("a leaf opens its functions with the changed lines marked; Esc closes them"
   const changed = within(panel).getByText("retry()").closest(".logic-line")!;
   expect(changed).toHaveClass("changed");
 
-  await userEvent.click(within(panel).getByRole("button", { name: "Show in Review" }));
+  await userEvent.click(within(panel).getByRole("button", { name: "Show in Code view" }));
   expect(onShowInReview).toHaveBeenCalledWith("app/visits.py", 3);
 
   await userEvent.keyboard("{Escape}");

@@ -7,7 +7,7 @@ export type FileView = "rendered" | "diff";
 type Props = {
   file: PageFile;
   index: number;
-  /** Set from outside (e.g. the Logic view's "Show in Review"); otherwise the file keeps its own. */
+  /** Set from outside (e.g. the Logic view's "Show in Code view"); otherwise the file keeps its own. */
   view?: FileView;
   onViewChange?: (path: string, view: FileView) => void;
 };
