@@ -36,7 +36,7 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
         modules[path] = module_name(path, prefix)
         added, removed = changed_lines(f.get("patch"))
         entry = {"path": path, "status": f["status"], "head_src": None, "base_src": None,
-                 "added": added, "removed": removed, "symbols": []}
+                 "added": added, "removed": removed, "symbols": [], "previous_path": f.get("previous_path")}
         prepared.append(entry)
         if not path.endswith(".py"):
             continue

@@ -5,10 +5,15 @@ from __future__ import annotations
 import ast
 import difflib
 import re
+from pathlib import Path
 
 from .symbols import MODULE, Symbol
 
 MOVE_SIMILARITY = 0.8
+MIN_MOVE_BODY = 40  # characters: shorter bodies ("pass", "return self.x") match anything
+MOVE_COMPARISONS = 20_000  # full similarity checks per PR, at most
+CHANGES_LIMIT = 400  # above this many changes the graph isn't built (the Files view still is)
+IMPORTER_SCAN_LIMIT = 500  # unchanged modules scanned for callers
 
 
 def _label(s: Symbol) -> str:
@@ -42,7 +47,9 @@ def change_nodes(files: list[dict]) -> list[dict]:
     bodies: dict[str, str] = {}
     for f in files:
         path = f["path"]
-        if not path.endswith(".py"):
+        unreadable = path.endswith(".py") and not f["symbols"] and (f["head_src"] is None or f["base_src"] is None) \
+            and f["status"] != "added"
+        if not path.endswith(".py") or unreadable:  # one node for the whole file
             nodes.append({
                 "id": f"{path}::", "file": path, "label": path.split("/")[-1], "kind": "file",
                 "change": {"added": "added", "removed": "removed"}.get(f["status"], "modified"),
@@ -79,16 +86,42 @@ def change_nodes(files: list[dict]) -> list[dict]:
     return _merge_moves(nodes, bodies)
 
 
+def _tokens(body: str) -> list[str]:
+    return re.findall(r"\w+|[^\w\s]", body)
+
+
 def _merge_moves(nodes: list[dict], bodies: dict[str, str]) -> list[dict]:
-    """An added symbol whose body matches a removed one is that symbol, moved or renamed."""
-    removed = [n for n in nodes if n["change"] == "removed" and n["id"] in bodies]
-    added = [n for n in nodes if n["change"] == "added" and n["id"] in bodies]
+    """An added symbol whose body matches a removed one is that symbol, moved or renamed.
+
+    Bodies are compared as token lists, cheapest checks first, with a cap on full comparisons
+    so a big refactor can't stall the map.
+    """
+    usable = {i: b for i, b in bodies.items() if len(b) >= MIN_MOVE_BODY}
+    removed = [n for n in nodes if n["change"] == "removed" and n["id"] in usable]
+    added = [n for n in nodes if n["change"] == "added" and n["id"] in usable]
+    tokens = {n["id"]: _tokens(usable[n["id"]]) for n in removed + added}
     pairs = []
+    exact = {}
+    for r in removed:
+        exact.setdefault((r["kind"], usable[r["id"]]), r["id"])
+    budget = MOVE_COMPARISONS
     for a in added:
+        same = exact.get((a["kind"], usable[a["id"]]))
+        if same:
+            pairs.append((1.0, a["id"], same))
+            continue
+        ta = tokens[a["id"]]
         for r in removed:
-            if a["kind"] != r["kind"] or not bodies[a["id"]]:
+            tr = tokens[r["id"]]
+            if a["kind"] != r["kind"] or 2 * min(len(ta), len(tr)) / (len(ta) + len(tr)) < MOVE_SIMILARITY:
                 continue
-            ratio = difflib.SequenceMatcher(None, bodies[r["id"]], bodies[a["id"]]).ratio()
+            matcher = difflib.SequenceMatcher(None, tr, ta, autojunk=False)
+            if matcher.real_quick_ratio() < MOVE_SIMILARITY or matcher.quick_ratio() < MOVE_SIMILARITY:
+                continue
+            if budget <= 0:
+                break
+            budget -= 1
+            ratio = matcher.ratio()
             if ratio >= MOVE_SIMILARITY:
                 pairs.append((ratio, a["id"], r["id"]))
     gone: set[str] = set()
@@ -236,8 +269,13 @@ def change_graph(prepared: list[dict], nodes: list[dict], graph, import_root, wo
 
     `prepared` are the PR's files as passed to change_nodes; `module_of` maps paths to modules.
     """
-    from .graph import module_path
+    from .graph import module_name, module_path
     from .reading import PHASES, _dependency_order, phase_for
+
+    prefix = import_root.relative_to(worktree).as_posix() if import_root != worktree else ""
+    count = sum(1 for n in nodes if n["change"] != "caller")
+    if count > CHANGES_LIMIT:
+        return {"nodes": [], "edges": [], "readingPath": [], "tooMany": count}
 
     by_id = {n["id"]: n for n in nodes}
     path_of_module = {m: p for p, m in module_of.items() if m}
@@ -256,7 +294,32 @@ def change_graph(prepared: list[dict], nodes: list[dict], graph, import_root, wo
                 methods.setdefault(n["name"].split(".")[-1], []).append(n["id"])
         if n["change"] == "moved":
             gone[(module_of.get(n["from"]["file"]) or "", n["from"]["name"])] = n["id"]
-    known = set(graph.modules) if graph is not None else set(path_of_module)
+    # A renamed file's symbols are all gone from the old module name.
+    for f in prepared:
+        old = f.get("previous_path")
+        old_module = old and module_name(old, prefix)
+        if old_module:
+            for n in nodes:
+                if n["file"] == f["path"] and n.get("name") and n["kind"] not in ("file", "module"):
+                    gone.setdefault((old_module, n["name"]), n["id"])
+    gone_modules = {m for m, _ in gone}
+    known = (set(graph.modules) if graph is not None else set(path_of_module)) | gone_modules
+
+    # Names a PR module still binds (a re-export after a move) aren't gone.
+    for f in prepared:
+        module = module_of.get(f["path"])
+        if not module or not f["head_src"]:
+            continue
+        try:
+            scope = _Scope(ast.parse(f["head_src"]), module, f["path"].endswith("__init__.py"), known)
+        except SyntaxError:
+            continue
+        for name in list(scope.imported) + list(scope.own):
+            if (module, name) in gone:
+                target = scope.imported.get(name)
+                if target in live:
+                    live[(module, name)] = live[target]
+                del gone[(module, name)]
 
     edges: dict[tuple[str, str], dict] = {}
     callers: dict[str, dict] = {}
@@ -297,12 +360,14 @@ def change_graph(prepared: list[dict], nodes: list[dict], graph, import_root, wo
                             break
                 if target is None or target == unit_id:
                     continue
+                if kind == "method" and not changed:
+                    continue  # a guess about unchanged code would add callers for every d.get(...)
                 if kind == "method":
                     edge = "probable"
+                elif broken:  # even in a test: it will fail
+                    edge = "breaks-removed"
                 elif testing:
                     edge = "tests"
-                elif broken:
-                    edge = "breaks-removed"
                 elif not changed and by_id[target]["signatureChanged"]:
                     edge = "breaks-signature"
                 else:
@@ -321,18 +386,34 @@ def change_graph(prepared: list[dict], nodes: list[dict], graph, import_root, wo
         module = module_of.get(f["path"])
         if module and f["head_src"]:
             scan(f["path"], module, f["head_src"])
+    pr_paths = {f["path"] for f in prepared}
+    to_scan: dict[str, Path] = {}
     if graph is not None:
         changed_modules = {module_of[f["path"]] for f in prepared if module_of.get(f["path"])} & set(graph.modules)
-        importers = set()
         for m in changed_modules:
-            importers |= graph.find_modules_that_directly_import(m)
-        for m in sorted(importers - changed_modules):
-            path = module_path(import_root, m)
-            try:
-                source = path.read_text()
-            except (OSError, UnicodeDecodeError):
+            for importer in graph.find_modules_that_directly_import(m):
+                if importer not in changed_modules:
+                    to_scan[importer] = module_path(import_root, importer)
+    # Deleted or renamed modules aren't in the head graph: find who still names them in the text.
+    missing = gone_modules - (set(graph.modules) if graph is not None else set())
+    if missing:
+        needles = {m.rsplit(".", 1)[-1] for m in missing}
+        for path in sorted(import_root.rglob("*.py")):
+            rel = path.relative_to(worktree).as_posix()
+            if rel in pr_paths or path.is_symlink() or not path.is_file():
                 continue
-            scan(path.relative_to(worktree).as_posix(), m, source)
+            text = _read_text(path)
+            if any(needle in text for needle in needles):
+                to_scan.setdefault(module_name(rel, prefix) or rel, path)
+    truncated = len(to_scan) > IMPORTER_SCAN_LIMIT
+    for m in sorted(to_scan)[:IMPORTER_SCAN_LIMIT]:
+        path = to_scan[m]
+        rel = path.relative_to(worktree).as_posix()
+        if rel in pr_paths or path.is_symlink():
+            continue
+        source = _read_text(path)
+        if source:
+            scan(rel, module_name(rel, prefix) or m, source)
 
     _replacements(prepared, by_id, module_of, known, live, gone, add)
 
@@ -346,7 +427,17 @@ def change_graph(prepared: list[dict], nodes: list[dict], graph, import_root, wo
     reading = [{"phase": p, "ids": [i for i in ordered if phase[i] == p]} for p in PHASES if p in phase.values()]
     if callers:
         reading.append({"phase": "check", "ids": sorted(callers)})
-    return {"nodes": nodes + list(callers.values()), "edges": list(edges.values()), "readingPath": reading}
+    result = {"nodes": nodes + list(callers.values()), "edges": list(edges.values()), "readingPath": reading}
+    if truncated:
+        result["callersTruncated"] = True
+    return result
+
+
+def _read_text(path) -> str:
+    try:
+        return "" if path.is_symlink() else path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return ""
 
 
 def _replacements(prepared, by_id, module_of, known, live, gone, add) -> None:

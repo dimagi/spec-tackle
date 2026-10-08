@@ -215,7 +215,8 @@ async def pr_map(request: Request, owner: str, repo: str, number: int):
     shas = {"owner": owner, "repo": repo, "base": refs["baseRefOid"], "head": refs["headRefOid"]}
     try:
         files = [] if jobs.cached(**shas) or jobs.running(**shas) else [
-            {k: f.get(k) for k in ("status", "additions", "deletions", "patch")} | {"path": f["filename"]}
+            {k: f.get(k) for k in ("status", "additions", "deletions", "patch")}
+            | {"path": f["filename"], "previous_path": f.get("previous_filename")}
             for f in await client.files(pr)
         ]
         result = await jobs.get(**shas, files=files, token=client.token)

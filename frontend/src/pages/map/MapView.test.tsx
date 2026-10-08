@@ -144,3 +144,28 @@ test("very large PRs can't switch to Changes", async () => {
   expect(changesButton).toBeDisabled();
   expect(changesButton).toHaveAttribute("title", expect.stringMatching(/too many changes/));
 });
+
+test("hovering a change doesn't hand the graph new nodes (no re-layout)", async () => {
+  const renderChangeGraph = vi.fn((_g: { nodes: unknown; edges: unknown }) => null);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(withChanges(2)))));
+  const page = makePage({ files: [makeFile({ path: "shop/sync.py" })] });
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MapView page={page} pr={{ owner: "o", repo: "r", number: 7 }} head="abc1234" onOpenFile={vi.fn()} renderChangeGraph={renderChangeGraph} />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "Changes" }));
+  const before = renderChangeGraph.mock.calls.at(-1)![0];
+  await userEvent.hover(screen.getAllByTestId("change-row")[0]);
+  const after = renderChangeGraph.mock.calls.at(-1)![0];
+  expect(renderChangeGraph.mock.calls.length).toBeGreaterThan(1);
+  expect(after.nodes).toBe(before.nodes);
+  expect(after.edges).toBe(before.edges);
+});
+
+test("when the backend skipped the change graph, Changes is disabled", async () => {
+  renderMap({ ...ready, changes: { nodes: [], edges: [], readingPath: [], tooMany: 812 } });
+  const changesButton = await screen.findByRole("button", { name: "Changes" });
+  expect(changesButton).toBeDisabled();
+  expect(changesButton).toHaveAttribute("title", expect.stringMatching(/812/));
+});

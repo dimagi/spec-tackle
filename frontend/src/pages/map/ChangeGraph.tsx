@@ -2,7 +2,8 @@ import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edg
 import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEdge, ChangeEdgeType, ChangeNode } from "../../api/map";
-import { BOX_HEADER, CHANGE_H, CHANGE_W, collapse, layoutChanges, type LaidBox, type LaidNode } from "./changeLayout";
+import { collapse } from "./changeFilters";
+import { BOX_HEADER, CHANGE_H, CHANGE_W, layoutChanges, type LaidBox, type LaidNode } from "./changeLayout";
 import { focusSet } from "./focus";
 
 const EDGE_STYLE: Record<ChangeEdgeType, { stroke: string; width: number; dash?: string; label?: string }> = {
@@ -21,7 +22,7 @@ function ChangeCard({ data }: NodeProps<Node<ChangeData>>) {
   const n = data.node;
   return (
     <>
-      <Handle type="target" position={Position.Bottom} className="map-handle" />
+      <Handle type="target" position={Position.Top} className="map-handle" />
       <div className={`change-node ${n.change} ${data.highlighted ? "is-hl" : ""}`} style={{ width: CHANGE_W, height: CHANGE_H, opacity: data.faded ? 0.2 : 1 }}>
         <div className="truncate font-mono text-[12px]">
           {n.label}
@@ -32,7 +33,7 @@ function ChangeCard({ data }: NodeProps<Node<ChangeData>>) {
           {n.change === "caller" ? "unchanged" : n.change === "moved" && n.from ? `was ${n.from.name}` : `+${n.additions} −${n.deletions}`}
         </div>
       </div>
-      <Handle type="source" position={Position.Top} className="map-handle" />
+      <Handle type="source" position={Position.Bottom} className="map-handle" />
     </>
   );
 }
@@ -41,12 +42,12 @@ function FileBox({ data }: NodeProps<Node<BoxData>>) {
   const b = data.box;
   return (
     <div className={`change-box ${b.collapsed ? "collapsed" : ""}`} style={{ width: b.w, height: b.h, opacity: data.faded ? 0.3 : 1 }}>
-      <Handle type="target" position={Position.Bottom} className="map-handle" />
+      <Handle type="target" position={Position.Top} className="map-handle" />
       <button className="change-box-head" style={{ height: BOX_HEADER }} onClick={data.onToggle} title={b.collapsed ? "Show the changes" : "Collapse this file"}>
         {b.collapsed ? "▸" : "▾"} {b.file}
       </button>
       {b.collapsed && <div className="px-3 text-xs text-stone-500">{data.summary}</div>}
-      <Handle type="source" position={Position.Top} className="map-handle" />
+      <Handle type="source" position={Position.Bottom} className="map-handle" />
     </div>
   );
 }
@@ -70,7 +71,9 @@ export function ChangeGraph({ nodes, edges, selected, hover, onHover, onSelect, 
   const [laid, setLaid] = useState<{ boxes: LaidBox[]; nodes: LaidNode[] } | null>(null);
   useEffect(() => {
     let live = true;
-    layoutChanges(nodes, edges, collapsed).then((r) => { if (live) setLaid(r); });
+    layoutChanges(nodes, edges, collapsed)
+      .then((r) => { if (live) setLaid(r); })
+      .catch(() => { if (live) setLaid({ boxes: [], nodes: [] }); });
     return () => { live = false; };
   }, [nodes, edges, collapsed]);
 
@@ -83,8 +86,10 @@ export function ChangeGraph({ nodes, edges, selected, hover, onHover, onSelect, 
     if (next.has(file)) next.delete(file); else next.add(file);
     return next;
   });
+  // The layout catches up asynchronously: until it does, draw only what's still shown.
+  const files = new Set(nodes.map((n) => n.file));
   const flowNodes: Node[] = [
-    ...laid.boxes.map((b) => {
+    ...laid.boxes.filter((b) => files.has(b.file)).map((b) => {
       const inBox = nodes.filter((n) => n.file === b.file);
       const summary = `${b.count} change${b.count === 1 ? "" : "s"}${inBox.some((n) => n.change === "caller") ? " · callers" : ""}`;
       return {
@@ -93,13 +98,14 @@ export function ChangeGraph({ nodes, edges, selected, hover, onHover, onSelect, 
         data: { box: b, summary, faded: !!focus && !inBox.some((n) => focus.has(n.id)), onToggle: () => toggle(b.file) },
       };
     }),
-    ...laid.nodes.map((l) => ({
+    ...laid.nodes.filter((l) => byId.has(l.id)).map((l) => ({
       // "nopan": pressing a change mustn't start panning, or the click lands on the pane instead.
       id: l.id, type: "change", className: "nopan", parentId: l.parent, extent: "parent" as const, position: { x: l.x, y: l.y }, draggable: false, zIndex: 1,
       data: { node: byId.get(l.id)!, faded: !!focus && !focus.has(l.id), highlighted: hover === l.id || selected === l.id },
     })),
   ];
-  const flowEdges: Edge[] = collapse(edges, collapsed).map((e, i) => {
+  const drawn = new Set([...flowNodes.map((n) => n.id)]);
+  const flowEdges: Edge[] = collapse(edges, collapsed).filter((e) => drawn.has(e.from) && drawn.has(e.to)).map((e, i) => {
     const s = EDGE_STYLE[e.type];
     const faded = !!focus && !(focus.has(e.from) && focus.has(e.to));
     return {

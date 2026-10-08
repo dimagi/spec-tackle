@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMap, useNarration, type ChangeEdge, type ChangeNode, type PRMap } from "../../api/map";
 import type { Page } from "../../api/types";
 import type { PRRef } from "../../state/storage";
 import { ChangeDetail } from "./ChangeDetail";
-import { visibleChanges, type ChangeFilters } from "./changeLayout";
+import { visibleChanges, type ChangeFilters } from "./changeFilters";
 import { ChangePath } from "./ChangePath";
 import { pathGroups, ReadingPath } from "./ReadingPath";
 import { isReviewed, loadReviewed, toggleReviewed } from "./reviewed";
@@ -53,11 +53,19 @@ export function MapView({ page, pr, head, onOpenFile, renderGraph, renderChangeG
   const open = (path: string) => (inPR(path) ? onOpenFile(path) : window.open(linkFor(path), "_blank", "noopener"));
 
   const changes = map?.changes;
-  const changeCount = changes ? changes.nodes.filter((n) => n.change !== "caller").length : 0;
-  const phaseOf = (file: string) =>
-    map?.nodes.find((n) => n.id === file)?.phase ?? (/(^|\/)(tests\/|test_)/.test(file) ? "tests" : "core");
-  const shown = changes && mode === "changes" ? visibleChanges(changes, filters, phaseOf) : null;
-  const shownIds = new Set(shown?.nodes.map((n) => n.id) ?? []);
+  const changeCount = changes ? changes.tooMany ?? changes.nodes.filter((n) => n.change !== "caller").length : 0;
+  // Memoised: a new array here would re-run the graph layout on every hover.
+  const shown = useMemo(() => {
+    if (!changes || mode !== "changes") return null;
+    const phaseOf = (file: string) =>
+      map?.nodes.find((n) => n.id === file)?.phase ?? (/(^|\/)(tests\/|test_)/.test(file) ? "tests" : "core");
+    return visibleChanges(changes, filters, phaseOf);
+  }, [changes, mode, filters, map]);
+  const shownIds = useMemo(() => new Set(shown?.nodes.map((n) => n.id) ?? []), [shown]);
+  const initialCollapsed = useMemo(
+    () => (changes && changeCount > COLLAPSE_ABOVE ? [...new Set(changes.nodes.map((n) => n.file))] : []),
+    [changes, changeCount],
+  );
 
   // j/k walk the rows as shown, x ticks (files in the PR only), Enter opens; in Changes mode they walk the changes.
   const fileOrder = map ? pathGroups(map.readingPath, map.nodes).flatMap((g) => [...g.files, ...g.dependents]) : [];
@@ -158,7 +166,7 @@ export function MapView({ page, pr, head, onOpenFile, renderGraph, renderChangeG
             <div className="map-graph">
               {renderChangeGraph({
                 nodes: shown.nodes, edges: shown.edges, selected: change, hover: changeHover, onHover: setChangeHover, onSelect: setChange,
-                initialCollapsed: changeCount > COLLAPSE_ABOVE ? [...new Set(changes.nodes.map((n) => n.file))] : [],
+                initialCollapsed,
               })}
             </div>
           )}

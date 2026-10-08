@@ -48,6 +48,9 @@ export type Changes = {
   nodes: ChangeNode[];
   edges: ChangeEdge[];
   readingPath: { phase: Phase | "check"; ids: string[] }[];
+  /** Set when the PR has too many changes to build the graph (the count). */
+  tooMany?: number;
+  callersTruncated?: boolean;
 };
 
 export type PRMap = {
