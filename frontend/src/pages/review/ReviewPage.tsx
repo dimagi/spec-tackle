@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { activityKey, apiBase, claudeKey, useClaudeThreads, useLiveActivity, usePage } from "../../api/queries";
 import { ApiError, onSignedOut, request } from "../../api/request";
@@ -29,6 +29,9 @@ import { Rail } from "./Rail";
 import { ReplyBox } from "./ReplyBox";
 import { SelectionButton, useSelection } from "./SelectionButton";
 import { TopBar } from "./TopBar";
+
+// React Flow is only needed on the Map tab.
+const MapGraph = lazy(() => import("../map/MapGraph").then((m) => ({ default: m.MapGraph })));
 
 export function ReviewPage() {
   const params = useParams();
@@ -359,7 +362,14 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
           onSelect={(id) => store.getState().setTab(id as "review" | "map")} />}
       />
       {tab === "map" && (
-        <MapView page={page} pr={pr} head={activity.headSha} onOpenFile={(path) => store.getState().openFileChanges(path)} />
+        <MapView
+          page={page} pr={pr} head={activity.headSha} onOpenFile={(path) => store.getState().openFileChanges(path)}
+          renderGraph={(g) => (
+            <Suspense fallback={<div className="grid h-full place-items-center text-sm text-stone-500">Loading graph…</div>}>
+              <MapGraph {...g} onOpen={(path) => store.getState().openFileChanges(path)} />
+            </Suspense>
+          )}
+        />
       )}
       <div className="flex" hidden={tab !== "review"}>
         <Rail files={page.files} claude={page.claude} stats={stats} headingCounts={counts}
