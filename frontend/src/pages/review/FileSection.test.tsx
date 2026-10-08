@@ -3,24 +3,25 @@ import userEvent from "@testing-library/user-event";
 import { makeFile } from "../../test/fixtures";
 import { FileSection } from "./FileSection";
 
-test("a modified markdown file shows the document, and can switch to changes", async () => {
+test("a modified markdown file shows the changes, and can switch to the document", async () => {
   const onViewChange = vi.fn();
   const { container } = render(<FileSection file={makeFile()} index={1} onViewChange={onViewChange} />);
   const rendered = container.querySelector('.view[data-view="rendered"]')!;
   const diff = container.querySelector('.view[data-view="diff"]')!;
-  expect(rendered).toBeVisible();
-  expect(diff).not.toBeVisible();
-
-  await userEvent.click(screen.getByRole("button", { name: "Changes" }));
-
-  expect(rendered).not.toBeVisible();
   expect(diff).toBeVisible();
-  expect(onViewChange).toHaveBeenCalledWith("docs/a.md", "diff");
+  expect(rendered).not.toBeVisible();
+
+  await userEvent.click(screen.getByRole("button", { name: "Document" }));
+
+  expect(diff).not.toBeVisible();
+  expect(rendered).toBeVisible();
+  expect(onViewChange).toHaveBeenCalledWith("docs/a.md", "rendered");
 });
 
-test("a new markdown file has no toggle", () => {
-  render(<FileSection file={makeFile({ wholeFile: true, status: "added" })} index={1} />);
+test("a new markdown file has no toggle and shows the document", () => {
+  const { container } = render(<FileSection file={makeFile({ wholeFile: true, status: "added" })} index={1} />);
   expect(screen.queryByRole("button", { name: "Changes" })).toBeNull();
+  expect(container.querySelector('.view[data-view="rendered"]')).toBeVisible();
 });
 
 test("a code file shows its diff", () => {

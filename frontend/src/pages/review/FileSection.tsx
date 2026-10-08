@@ -7,8 +7,8 @@ export type FileView = "rendered" | "diff";
 type Props = { file: PageFile; index: number; onViewChange?: (path: string, view: FileView) => void };
 
 export function FileSection({ file, index, onViewChange }: Props) {
-  const [view, setView] = useState<FileView>(file.rendered ? "rendered" : "diff");
   const toggle = !!(file.rendered && file.diff && !file.wholeFile);
+  const [view, setView] = useState<FileView>(file.rendered && !toggle ? "rendered" : "diff");
   const pick = (v: FileView) => {
     setView(v);
     onViewChange?.(file.path, v);
