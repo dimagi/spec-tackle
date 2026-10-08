@@ -62,7 +62,8 @@ export function toMermaid(blocks: LogicBlock[], expanded: Set<string>): MermaidC
       ids.set(b.id, id);
       if (open) {
         clusters.set(id, b);
-        body.push(`${indent}subgraph ${id}["⊖ ${escapeLabel(title(b.label))}"]`, `${indent}  direction TB`);
+        // Non-breaking spaces keep the title on one line; Mermaid wraps subgraph titles but doesn't make room.
+        body.push(`${indent}subgraph ${id}["${`⊖ ${escapeLabel(title(b.label))}`.replace(/ /g, "\u00a0")}"]`, `${indent}  direction TB`);
         level(b.children!, indent + "  ");
         body.push(`${indent}end`);
       } else {

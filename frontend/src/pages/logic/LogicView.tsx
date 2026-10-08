@@ -227,7 +227,11 @@ function Chart({ chart, selected, onActivate, fallback }: ChartProps) {
       try {
         const { default: mermaid } = await import("mermaid");
         const dark = document.documentElement.classList.contains("dark");
-        mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral", securityLevel: "strict" });
+        mermaid.initialize({
+          startOnLoad: false, theme: dark ? "dark" : "neutral", securityLevel: "strict",
+          // The default (200px) wraps subgraph titles onto a second line that the box doesn't make room for.
+          flowchart: { wrappingWidth: 360 },
+        });
         const { svg } = await mermaid.render(`logic-chart-${++renderCount}`, chart.source);
         if (cancelled || !ref.current) return;
         ref.current.innerHTML = svg;

@@ -254,3 +254,12 @@ test("a run started for a newer head is followed at that head, so the new map is
   expect(await screen.findByText("Retries failed submissions.")).toBeInTheDocument();
   expect(screen.queryByText(/Generated for/)).toBeNull();
 });
+
+test("Mermaid wraps labels wide enough for a subgraph title to stay on one line", async () => {
+  setup();
+  await node(/Form is submitted/);
+  expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({
+    securityLevel: "strict",
+    flowchart: expect.objectContaining({ wrappingWidth: 360 }),
+  }));
+});

@@ -56,7 +56,7 @@ test("a block with children shows ⊕ until it's expanded", () => {
 test("an expanded block becomes a subgraph, and edges to it target the subgraph", () => {
   const { source, nodes, clusters } = toMermaid(MAP, new Set(["save"]));
   const l = lines(source);
-  const open = l.indexOf('subgraph c2["⊖ Save and sync"]');
+  const open = l.indexOf('subgraph c2["⊖\u00a0Save\u00a0and\u00a0sync"]');
   const close = l.indexOf("end", open);
   expect(open).toBeGreaterThan(0);
   expect(l.slice(open, close)).toEqual(expect.arrayContaining(['n3["Store it"]', 'n4[/"⚡ Sync"/]']));
@@ -88,5 +88,6 @@ test("allParentIds lists every block that has children", () => {
 test("long subgraph titles are shortened so Mermaid doesn't clip them", () => {
   const long = "can_act_as_program_manager_user(user, org) checks every membership";
   const { source } = toMermaid([block("p", { label: long, children: [block("q")] })], new Set(["p"]));
-  expect(lines(source)).toContain('subgraph c0["⊖ can_act_as_program_manager_user(user, org)…"]');
+  // Non-breaking spaces: Mermaid wraps subgraph titles onto a line the box doesn't make room for.
+  expect(lines(source)).toContain('subgraph c0["⊖\u00a0can_act_as_program_manager_user(user,\u00a0org)…"]');
 });
