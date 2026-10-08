@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ from .store import Store, StoreError
 from .turns import TurnRunner
 
 HERE = Path(__file__).parent
+SPA_SHELL = HERE / "static" / "dist" / "index.html"
 templates = Jinja2Templates(directory=HERE / "templates")
 
 
@@ -161,6 +162,21 @@ async def review_page(request: Request, owner: str, repo: str, number: int):
     )
 
 
+def spa_shell() -> FileResponse:
+    """The React app's entry page; it routes on the client and fetches its data from /api."""
+    return FileResponse(SPA_SHELL, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/next/")
+async def next_index():
+    return spa_shell()
+
+
+@app.get("/next/pr/{owner}/{repo}/{number}")
+async def next_review(owner: str, repo: str, number: int):
+    return spa_shell()
+
+
 @app.get("/raw/{owner}/{repo}/{ref}/{path:path}")
 async def raw(request: Request, owner: str, repo: str, ref: str, path: str):
     """Proxy repo files (e.g. images in a spec) so private repos work too."""
@@ -217,6 +233,15 @@ async def activity(request: Request, owner: str, repo: str, number: int):
     client = await gh(request)
     data = await client.activity(PRRef(owner, repo, number))
     return render.normalize_activity(data)
+
+
+@app.get("/api/session")
+async def session_info(request: Request):
+    return {
+        "viewer": await session(request).viewer(),
+        "ghCli": LoginFlow.available(),
+        "claude": bool(request.app.state.claude_cli),
+    }
 
 
 @app.get("/api/pr/{owner}/{repo}/{number}/page")

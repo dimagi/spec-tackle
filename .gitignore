@@ -3,3 +3,4 @@ __pycache__/
 .playwright-mcp/
 docs/superpowers/
 .superpowers/
+frontend/node_modules/
