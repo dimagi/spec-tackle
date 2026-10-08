@@ -1,8 +1,10 @@
 import { useRef, type ReactNode, type RefObject } from "react";
-import type { Thread } from "../../api/types";
+import type { ClaudeThread, Thread } from "../../api/types";
 import { isCollapsible, isShown, threadRange } from "../../lib/threads";
 import { useReview } from "../../state/review";
 import { useReviewPage } from "./context";
+import { ClaudeCard } from "./ClaudeCard";
+import type { Live } from "./hooks/claudeStream";
 import { ThreadCard } from "./ThreadCard";
 import { useMarginEngine, type MarginEngine, type MarginItem } from "./hooks/useMarginEngine";
 
@@ -13,11 +15,17 @@ type Props = {
   renderReply: (thread: Thread) => ReactNode;
   /** The composer card's content, when one is open. */
   composer: ReactNode;
+  claude: {
+    threads: ClaudeThread[];
+    lives: Map<string, Live>;
+    onFollowUp: (thread: ClaudeThread, question: string) => Promise<unknown>;
+    onDelete: (thread: ClaudeThread) => void;
+  };
 };
 
 const isInteractive = (target: EventTarget) => !!(target as Element).closest("a, textarea, button");
 
-export function Margin({ docRef, engineRef, onResolve, renderReply, composer }: Props) {
+export function Margin({ docRef, engineRef, onResolve, renderReply, composer, claude }: Props) {
   const { activity, fresh } = useReviewPage();
   const s = useReview((st) => st);
   const marginRef = useRef<HTMLDivElement>(null);
@@ -26,6 +34,9 @@ export function Margin({ docRef, engineRef, onResolve, renderReply, composer }: 
   const items: MarginItem[] = activity.threads.map((t) => ({
     id: t.id, kind: "thread", path: t.path, range: threadRange(t), resolved: t.isResolved, hidden: !isShown(t, filters),
   }));
+  for (const t of claude.threads) {
+    items.push({ id: t.id, kind: "claude", path: t.path, range: [t.startLine, t.endLine], hidden: !s.showClaude });
+  }
   if (s.composer) {
     items.push({ id: "composer", kind: "composer", path: s.composer.path, range: [s.composer.start, s.composer.end], hidden: false });
   }
@@ -58,6 +69,22 @@ export function Margin({ docRef, engineRef, onResolve, renderReply, composer }: 
           </div>
         );
       })}
+      {claude.threads.map((t) => (
+        <div
+          key={t.id}
+          data-card={t.id}
+          data-claude={t.id}
+          className="thread-card claude"
+          hidden={!s.showClaude}
+          onClick={(e) => { if (!isInteractive(e.target) && s.active !== t.id) s.activate(t.id); }}
+        >
+          <ClaudeCard
+            thread={t} headSha={activity.headSha} live={claude.lives.get(t.id) ?? null}
+            onFollowUp={(q) => claude.onFollowUp(t, q)} onDelete={() => claude.onDelete(t)}
+            onFocus={() => { if (s.active !== t.id) s.activate(t.id); }}
+          />
+        </div>
+      ))}
       {s.composer && (
         <div
           data-card="composer"

@@ -8,6 +8,8 @@ export const POLL_MS = 30_000;
 
 export const activityKey = (pr: PRRef) => ["activity", pr.owner, pr.repo, pr.number];
 
+export const claudeKey = (pr: PRRef) => ["claude", pr.owner, pr.repo, pr.number];
+
 export const apiBase = (pr: PRRef) => `/api/pr/${pr.owner}/${pr.repo}/${pr.number}`;
 
 export function useSession() {
@@ -61,7 +63,7 @@ export function useLiveActivity(pr: PRRef, initial: Activity) {
 
 export function useClaudeThreads(pr: PRRef, enabled: boolean) {
   return useQuery({
-    queryKey: ["claude", pr.owner, pr.repo, pr.number],
+    queryKey: claudeKey(pr),
     queryFn: () => request<ClaudeThread[]>("GET", `${apiBase(pr)}/claude/threads`),
     enabled,
   });

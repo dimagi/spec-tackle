@@ -1,9 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
-import { activityKey, apiBase, useLiveActivity, usePage } from "../../api/queries";
+import { activityKey, apiBase, claudeKey, useClaudeThreads, useLiveActivity, usePage } from "../../api/queries";
 import { ApiError, onSignedOut, request } from "../../api/request";
-import type { Comment, Page, Thread } from "../../api/types";
+import type { ClaudeThread, Comment, Page, Thread } from "../../api/types";
 import { Toaster } from "../../components/Toaster";
 import { applyActivity, initialSeen, type SeenState } from "../../lib/activity";
 import { headingCounts, isBotThread, isShown, stepThread } from "../../lib/threads";
@@ -17,6 +17,7 @@ import { Conversation } from "./Conversation";
 import { FinishReview, type ReviewEvent } from "./FinishReview";
 import { Description } from "./Description";
 import { FileSection } from "./FileSection";
+import { useClaudeStreams } from "./hooks/claudeStream";
 import { useKeyboard } from "./hooks/useKeyboard";
 import type { MarginEngine } from "./hooks/useMarginEngine";
 import { useMermaid } from "./hooks/useMermaid";
@@ -188,8 +189,48 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     }
   };
 
-  // Ask Claude is wired up with the Claude threads.
-  const askClaude = async (_body: string): Promise<void> => {};
+  const claudeThreads = useClaudeThreads(pr, page.claude);
+  const claudeList = claudeThreads.data ?? [];
+  const lives = useClaudeStreams(claudeList, () => claudeThreads.refetch());
+  useEffect(() => {
+    if (claudeThreads.error) toast(`Couldn't load Claude threads: ${(claudeThreads.error as Error).message}`, { kind: "error" });
+  }, [claudeThreads.error]);
+  const upsertClaude = (thread: ClaudeThread) =>
+    queryClient.setQueryData<ClaudeThread[]>(claudeKey(pr), (list = []) =>
+      list.some((t) => t.id === thread.id) ? list.map((t) => (t.id === thread.id ? thread : t)) : [...list, thread]);
+
+  const askClaude = async (question: string) => {
+    const c = store.getState().composer!;
+    try {
+      const thread = await request<ClaudeThread>("POST", `${api}/claude/threads`, { path: c.path, start: c.start, end: c.end, commit: renderedSha, question });
+      closeComposer();
+      upsertClaude(thread);
+      activate(thread.id);
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
+  const followUp = async (thread: ClaudeThread, question: string) => {
+    try {
+      upsertClaude(await request<ClaudeThread>("POST", `/api/claude/threads/${encodeURIComponent(thread.id)}/messages`, { question }));
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
+  const deleteClaude = async (thread: ClaudeThread) => {
+    if (!confirm("Delete this Claude thread? This can't be undone.")) return;
+    try {
+      await request("DELETE", `/api/claude/threads/${encodeURIComponent(thread.id)}`);
+      queryClient.setQueryData<ClaudeThread[]>(claudeKey(pr), (list = []) => list.filter((t) => t.id !== thread.id));
+      if (store.getState().active === thread.id) activate(null);
+    } catch (err) {
+      fail(err);
+    }
+  };
 
   const postReply = async (thread: Thread, body: string) => {
     try {
@@ -324,6 +365,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
                 <ReplyBox pr={pr} threadId={t.id} onSubmit={(body) => postReply(t, body)}
                   onFocus={() => { if (store.getState().active !== t.id) activate(t.id); }} />
               )}
+              claude={{ threads: claudeList, lives, onFollowUp: followUp, onDelete: deleteClaude }}
               composer={composer && (
                 <Composer
                   key={`${composer.path}:${composer.start}:${composer.end}`}
