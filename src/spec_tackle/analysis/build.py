@@ -35,7 +35,10 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
         if not path.endswith(".py"):
             continue
         head = "" if f["status"] == "removed" else _read(worktree / path)
-        base = base_text(head, f.get("patch"), f["status"])
+        if f["status"] == "renamed" and not f.get("patch") and not f["additions"] + f["deletions"]:
+            base = head  # moved without edits: GitHub sends no patch, and nothing changed
+        else:
+            base = base_text(head, f.get("patch"), f["status"])
         if base is None and f["status"] != "added":
             base_missing = True
             symbols[path] = []
@@ -64,7 +67,8 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
         nodes.append({
             "id": f["path"], "hop": 0, "status": f["status"], "additions": f["additions"], "deletions": f["deletions"],
             "phase": phase, "tag": tag_for(f, phase, symbols.get(f["path"], [])), "module": modules[f["path"]],
-            "symbols": [_symbol_json(s) for s in symbols.get(f["path"], [])], "inGraph": f["path"] in drawn,
+            "symbols": [_symbol_json(s) for s in symbols.get(f["path"], [])],
+            "inGraph": f["path"] in drawn and phase != "other",  # docs and config only appear in the reading path
         })
 
     edges: list[dict] = []
@@ -80,7 +84,7 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
                 refs = _refs(source, m, path_of[m], {d: sym_names[d]})
                 edges.append({"from": path_of[m], "to": path_of[d], "symbols": refs})
 
-        deps = hop1(graph, drawn_modules, import_root, {m: symbols.get(path_of[m], []) for m in drawn_modules}, worktree)
+        deps = hop1(graph, drawn_modules, import_root, {m: symbols.get(path_of[m], []) for m in drawn_modules}, worktree, exclude=changed)
         more = indirect(graph, {d["module"] for d in deps}, exclude=changed)
         for d in deps:
             hop2 = [module_path(import_root, m).relative_to(worktree).as_posix() for m in more[d["module"]]]
@@ -103,6 +107,9 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
 
 
 def _read(path: Path) -> str:
+    """A checkout file's text; never follows a symlink (a PR could point one at /dev/zero)."""
+    if path.is_symlink() or not path.is_file():
+        return ""
     try:
         return path.read_text()
     except (OSError, UnicodeDecodeError):

@@ -104,3 +104,38 @@ def test_big_prs_draw_only_the_largest_files(tmp_path):
     assert len(drawn) == 40
     assert min(n["additions"] for n in drawn) == 121
     assert sum(len(p["files"]) for p in result["readingPath"]) == 160
+
+
+def test_a_pure_rename_has_nothing_missing(tmp_path):
+    root = write_repo(tmp_path, {**SHOP, "shop/orders.py": SHOP["shop/models.py"]})
+    files = [{"path": "shop/orders.py", "status": "renamed", "additions": 0, "deletions": 0, "patch": None}]
+    result = build_map(root, files)
+    assert result["limits"]["baseMissing"] is False
+    assert node(result, "shop/orders.py")["symbols"] == []
+
+
+def test_other_files_are_not_drawn(tmp_path):
+    result = build_map(write_repo(tmp_path, HEAD_SHOP), shop_files())
+    assert node(result, "README.md")["inGraph"] is False
+    assert node(result, "shop/sync.py")["inGraph"] is True
+
+
+def test_truncated_prs_never_list_a_changed_file_as_a_dependent(tmp_path):
+    files = {f"big/m{i}.py": "x = 1\n" for i in range(160)}
+    files["big/small.py"] = "from big import m159\n"
+    root = write_repo(tmp_path, {"big/__init__.py": "", **files})
+    pr = [{"path": p, "status": "added", "additions": i + 1, "deletions": 0, "patch": added_patch(t)} for i, (p, t) in enumerate(files.items())]
+    pr[-1]["additions"] = 1  # small.py is too small to be drawn, but it imports a drawn module
+
+    result = build_map(root, pr)
+
+    ids = [n["id"] for n in result["nodes"]]
+    assert len(ids) == len(set(ids))
+
+
+def test_symlinked_files_are_not_read(tmp_path):
+    root = write_repo(tmp_path, SHOP)
+    (root / "shop" / "evil.py").symlink_to("/dev/zero")
+    files = [{"path": "shop/evil.py", "status": "added", "additions": 1, "deletions": 0, "patch": "@@ -0,0 +1 @@\n+x"}]
+    result = build_map(root, files)  # must return, not hang on /dev/zero
+    assert result["status"] == "ready"

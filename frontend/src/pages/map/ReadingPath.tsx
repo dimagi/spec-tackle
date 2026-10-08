@@ -3,6 +3,15 @@ import type { MapNode, Phase } from "../../api/map";
 const PHASE_LABEL: Record<Phase, string> = { data: "Data", core: "Core logic", edges: "Edges", tests: "Tests", other: "Other" };
 const PHASES: Phase[] = ["data", "core", "edges", "tests", "other"];
 
+/** Rows as shown: per phase, the changed files in order, then the dependents to check. */
+export function pathGroups(phases: { phase: Phase; files: string[] }[], nodes: MapNode[]) {
+  return PHASES.map((phase) => ({
+    phase,
+    files: phases.find((p) => p.phase === phase)?.files ?? [],
+    dependents: nodes.filter((n) => n.hop === 1 && n.phase === phase).map((n) => n.id),
+  })).filter((g) => g.files.length || g.dependents.length);
+}
+
 export type ReadingPathProps = {
   phases: { phase: Phase; files: string[] }[];
   nodes: MapNode[];
@@ -14,22 +23,20 @@ export type ReadingPathProps = {
   onSelect: (path: string) => void;
   onOpen: (path: string) => void;
   onToggleReviewed: (path: string) => void;
+  /** Where to read a file that isn't in the PR (on GitHub). */
+  linkFor?: (path: string) => string;
 };
 
 const size = (n: MapNode) => (n.additions ?? 0) + (n.deletions ?? 0);
 const dot = (n: MapNode) =>
   n.hop === 1 ? "bg-stone-300" : n.status === "added" ? "bg-emerald-500" : n.status === "removed" ? "bg-rose-500" : "bg-sky-500";
 
-export function ReadingPath({ phases, nodes, reviewed, narration, selected, hover, onHover, onSelect, onOpen, onToggleReviewed }: ReadingPathProps) {
+export function ReadingPath({ phases, nodes, reviewed, narration, selected, hover, onHover, onSelect, onOpen, onToggleReviewed, linkFor }: ReadingPathProps) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const changed = phases.flatMap((p) => p.files);
   const done = changed.filter(reviewed).length;
   const largest = Math.max(1, ...nodes.filter((n) => n.hop === 0).map(size));
-  const groups = PHASES.map((phase) => ({
-    phase,
-    files: phases.find((p) => p.phase === phase)?.files ?? [],
-    dependents: nodes.filter((n) => n.hop === 1 && n.phase === phase).map((n) => n.id),
-  })).filter((g) => g.files.length || g.dependents.length);
+  const groups = pathGroups(phases, nodes);
 
   const row = (path: string, step: number | null) => {
     const n = byId.get(path);
@@ -48,9 +55,16 @@ export function ReadingPath({ phases, nodes, reviewed, narration, selected, hove
             aria-label={`Reviewed ${path}`} onClick={(e) => e.stopPropagation()} onChange={() => onToggleReviewed(path)} />
           <span className="w-5 text-right font-mono text-[10px] text-stone-400">{step ?? ""}</span>
           <span className={`h-2 w-2 shrink-0 rounded-sm ${n ? dot(n) : "bg-stone-300"}`} />
-          <button className="min-w-0 flex-1 truncate text-left font-mono text-xs" title={path} onClick={(e) => { e.stopPropagation(); onOpen(path); }}>
-            <span className="text-stone-400">{dir}</span>{name}
-          </button>
+          {dependent && linkFor ? (
+            <a className="min-w-0 flex-1 truncate font-mono text-xs hover:underline" title={`${path} on GitHub`} href={linkFor(path)}
+              target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>
+              <span className="text-stone-400">{dir}</span>{name}
+            </a>
+          ) : (
+            <button className="min-w-0 flex-1 truncate text-left font-mono text-xs" title={path} onClick={(e) => { e.stopPropagation(); onOpen(path); }}>
+              <span className="text-stone-400">{dir}</span>{name}
+            </button>
+          )}
           {dependent ? (
             <span className="map-tag check" title={n?.references?.length ? `uses ${n.references.join(", ")}` : undefined}>not in PR · check</span>
           ) : (

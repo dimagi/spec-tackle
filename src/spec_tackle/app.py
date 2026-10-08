@@ -257,6 +257,8 @@ async def narrate_map(request: Request, owner: str, repo: str, number: int):
     except Exception as exc:  # noqa: BLE001 — any SDK failure is shown beside the button
         raise HTTPException(502, claude.describe_error(exc))
     notes = maps.parse_notes(answer, paths)
+    if not notes:
+        raise HTTPException(502, "Claude's answer couldn't be read. Try again.")
     jobs.save_narration(**shas, notes=notes)
     return notes
 

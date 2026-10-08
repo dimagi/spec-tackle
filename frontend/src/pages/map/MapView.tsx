@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMap, useNarration, type PRMap } from "../../api/map";
 import type { Page } from "../../api/types";
 import type { PRRef } from "../../state/storage";
-import { ReadingPath } from "./ReadingPath";
+import { pathGroups, ReadingPath } from "./ReadingPath";
 import { isReviewed, loadReviewed, toggleReviewed } from "./reviewed";
 
 type Props = {
@@ -12,7 +12,10 @@ type Props = {
   head: string;
   onOpenFile: (path: string) => void;
   /** The dependency graph, given the map and the shared hover/selection. */
-  renderGraph?: (args: { map: PRMap; hover: string | null; selected: string | null; onHover: (p: string | null) => void; onSelect: (p: string) => void }) => ReactNode;
+  renderGraph?: (args: {
+    map: PRMap; hover: string | null; selected: string | null;
+    onHover: (p: string | null) => void; onSelect: (p: string) => void; onOpen: (p: string) => void;
+  }) => ReactNode;
 };
 
 function Notice({ children, tone = "info" }: { children: ReactNode; tone?: "info" | "warn" | "error" }) {
@@ -29,23 +32,26 @@ export function MapView({ page, pr, head, onOpenFile, renderGraph }: Props) {
   const isDone = (path: string) => isReviewed(reviewed, path, diffOf(path));
   const toggle = (path: string) => setReviewed(toggleReviewed(pr, path, diffOf(path)));
 
-  // j/k walk the reading path (changed files, then the dependents to check), x ticks, Enter opens.
-  const order = map ? [
-    ...map.readingPath.flatMap((p) => p.files),
-    ...map.nodes.filter((n) => n.hop === 1).map((n) => n.id),
-  ] : [];
-  const keys = useRef({ order, selected, toggle, onOpenFile });
-  keys.current = { order, selected, toggle, onOpenFile };
+  const linkFor = (path: string) => `https://github.com/${pr.owner}/${pr.repo}/blob/${head}/${path}`;
+  const inPR = (path: string) => map?.nodes.find((n) => n.id === path)?.hop !== 1;
+  // Files in the PR open in Review; dependents (not in the PR) open on GitHub.
+  const open = (path: string) => (inPR(path) ? onOpenFile(path) : window.open(linkFor(path), "_blank", "noopener"));
+
+  // j/k walk the rows as shown, x ticks (files in the PR only), Enter opens.
+  const order = map ? pathGroups(map.readingPath, map.nodes).flatMap((g) => [...g.files, ...g.dependents]) : [];
+  const keys = useRef({ order, selected, toggle, open, inPR });
+  keys.current = { order, selected, toggle, open, inPR };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as Element).closest?.("input, textarea, dialog") || e.metaKey || e.ctrlKey || e.altKey) return;
-      const { order, selected, toggle, onOpenFile } = keys.current;
+      const { order, selected, toggle, open, inPR } = keys.current;
       if (!order.length) return;
+      const onControl = !!(e.target as Element).closest?.("button, a, select");
       const i = selected ? order.indexOf(selected) : -1;
       if (e.key === "j") setSelected(order[Math.min(order.length - 1, i + 1)]);
       else if (e.key === "k") setSelected(order[Math.max(0, i - 1)]);
-      else if (e.key === "x" && selected) toggle(selected);
-      else if (e.key === "Enter" && selected) onOpenFile(selected);
+      else if (e.key === "x" && selected && inPR(selected)) toggle(selected);
+      else if (e.key === "Enter" && selected && !onControl) open(selected);
       else return;
       e.preventDefault();
     };
@@ -97,10 +103,11 @@ export function MapView({ page, pr, head, onOpenFile, renderGraph }: Props) {
         )}
       </div>
       <div className={`map-grid ${renderGraph ? "" : "single"}`}>
-        {renderGraph && <div className="map-graph">{renderGraph({ map, hover, selected, onHover: setHover, onSelect: setSelected })}</div>}
+        {renderGraph && <div className="map-graph">{renderGraph({ map, hover, selected, onHover: setHover, onSelect: setSelected, onOpen: open })}</div>}
         <ReadingPath
           phases={map.readingPath} nodes={map.nodes} reviewed={isDone} narration={narrate.data ?? {}}
-          selected={selected} hover={hover} onHover={setHover} onSelect={setSelected} onOpen={onOpenFile} onToggleReviewed={toggle}
+          selected={selected} hover={hover} onHover={setHover} onSelect={setSelected} onOpen={open} onToggleReviewed={toggle}
+          linkFor={linkFor}
         />
       </div>
     </div>

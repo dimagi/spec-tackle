@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import os
 import shutil
 import sys
@@ -43,11 +44,30 @@ MAX_UNPARSEABLE = 10
 
 
 def _grimp(import_root: Path, packages: list[str]) -> grimp.ImportGraph:
+    # grimp finds packages with importlib, which answers from sys.modules for anything
+    # already imported (e.g. spec_tackle itself): hide those so the checkout is found.
+    hidden = {name: mod for name, mod in sys.modules.items() if any(name == p or name.startswith(p + ".") for p in packages)}
+    for name in hidden:
+        del sys.modules[name]
     sys.path.insert(0, str(import_root))
+    importlib.invalidate_caches()
     try:
         return grimp.build_graph(*packages, cache_dir=None)
     finally:
         sys.path.remove(str(import_root))
+        for name in [n for n in sys.modules if any(n == p or n.startswith(p + ".") for p in packages)]:
+            del sys.modules[name]
+        sys.modules.update(hidden)
+        importlib.invalidate_caches()
+
+
+def _has_symlinks(import_root: Path, packages: list[str]) -> bool:
+    return any(
+        os.path.islink(os.path.join(dirpath, name))
+        for p in packages
+        for dirpath, dirnames, names in os.walk(import_root / p)
+        for name in [*names, *dirnames]
+    )
 
 
 def _mirror(src: Path, dst: Path) -> None:
@@ -56,7 +76,7 @@ def _mirror(src: Path, dst: Path) -> None:
         target = dst / Path(dirpath).relative_to(src)
         target.mkdir(parents=True, exist_ok=True)
         for name in names:
-            if name.endswith(".py"):
+            if name.endswith(".py") and not os.path.islink(Path(dirpath) / name):
                 try:
                     os.link(Path(dirpath) / name, target / name)
                 except OSError:
@@ -66,14 +86,21 @@ def _mirror(src: Path, dst: Path) -> None:
 def build_graph(import_root: Path, packages: list[str]) -> grimp.ImportGraph:
     """The import graph. grimp stops at a file it can't parse (e.g. Python 2), so those are
     blanked in a throwaway mirror of the packages and the build retried."""
-    try:
-        return _grimp(import_root, packages)
-    except SourceSyntaxError as first:
-        error: SourceSyntaxError | None = first
+    error: SourceSyntaxError | None = None
+    if not _has_symlinks(import_root, packages):  # symlinks could point anywhere: map a mirror without them
+        try:
+            return _grimp(import_root, packages)
+        except SourceSyntaxError as first:
+            error = first
     with tempfile.TemporaryDirectory(prefix="spec-tackle-graph-", dir=import_root.parent) as tmp:
         shadow = Path(tmp)
         for name in packages:
             _mirror(import_root / name, shadow / name)
+        if error is None:
+            try:
+                return _grimp(shadow, packages)
+            except SourceSyntaxError as first:
+                error = first
         for _ in range(MAX_UNPARSEABLE):
             reported = Path(error.filename)
             inside = shadow if reported.is_relative_to(shadow) else import_root
@@ -137,19 +164,24 @@ def hop1(
     import_root: Path,
     symbols: dict[str, list[Symbol]],
     repo_root: Path | None = None,
+    exclude: set[str] | None = None,
 ) -> list[dict]:
-    """Unchanged modules that directly import a changed module, with what they use from it."""
+    """Modules outside `exclude` (default: `changed`) that directly import a changed module,
+    with what they use from it."""
     repo_root = repo_root or import_root
+    exclude = changed if exclude is None else exclude | changed
     targets = {m: {s.name.split(".")[0] for s in symbols.get(m, []) if s.kind != "module"} for m in changed}
     importers: dict[str, list[str]] = {}
     for module in sorted(changed & graph.modules):
         for importer in graph.find_modules_that_directly_import(module):
-            if importer not in changed:
+            if importer not in exclude:
                 importers.setdefault(importer, []).append(module)
     deps = []
     for importer in sorted(importers):
         path = module_path(import_root, importer)
         try:
+            if path.is_symlink():
+                raise OSError("symlink")
             refs = references(path.read_text(), importer, path.name == "__init__.py", targets)
         except (OSError, SyntaxError, UnicodeDecodeError):
             refs = []

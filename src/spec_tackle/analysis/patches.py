@@ -7,12 +7,23 @@ import re
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
+def _rows(text: str) -> list[str]:
+    """Lines split on "\n" only: git counts nothing else (str.splitlines also splits on form feeds)."""
+    rows = text.split("\n")
+    return rows[:-1] if rows and rows[-1] == "" else rows
+
+
+def _lines(text: str) -> list[str]:
+    """Like splitlines(keepends=True), but only "\n" ends a line."""
+    return [row + "\n" for row in text.split("\n")[:-1]] + ([text.rsplit("\n", 1)[-1]] if not text.endswith("\n") and text else [])
+
+
 def changed_lines(patch: str | None) -> tuple[set[int], set[int]]:
     """(added head line numbers, removed base line numbers) in a unified patch."""
     added: set[int] = set()
     removed: set[int] = set()
     old = new = 0
-    for row in (patch or "").splitlines():
+    for row in _rows(patch or ""):
         match = _HUNK.match(row)
         if match:
             old, new = int(match.group(1)), int(match.group(3))
@@ -34,10 +45,10 @@ def base_text(head_text: str, patch: str | None, status: str) -> str | None:
         return ""
     if not patch:
         return None
-    head = head_text.splitlines(keepends=True)
+    head = _lines(head_text)
     base: list[str] = []
     cursor = 0  # next head line (0-based) not yet copied
-    for row in patch.splitlines():
+    for row in _rows(patch):
         match = _HUNK.match(row)
         if match:
             start = int(match.group(3)) - 1 if int(match.group(4) or 1) else int(match.group(3))

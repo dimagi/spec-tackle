@@ -121,3 +121,18 @@ def test_graph_survives_unparseable_files_without_touching_the_checkout(tmp_path
 def test_graph_survives_several_unparseable_files(tmp_path):
     root = write_repo(tmp_path, {**SHOP, "shop/py2.py": "print 'hi'\n", "shop/py2b.py": "exec 'x'\n"})
     assert "shop.sync" in build_graph(root, ["shop"]).modules
+
+
+def test_a_package_named_like_an_imported_module_maps_the_checkout(tmp_path):
+    # The worker has spec_tackle itself imported; a PR to spec-tackle must still map its own code.
+    root = write_repo(tmp_path, {"spec_tackle/__init__.py": "", "spec_tackle/only_here.py": "from spec_tackle import app\n", "spec_tackle/app.py": ""})
+    graph = build_graph(root, ["spec_tackle"])
+    assert "spec_tackle.only_here" in graph.modules
+    import spec_tackle.analysis  # still importable afterwards
+    assert spec_tackle.analysis
+
+
+def test_the_mirror_skips_symlinks(tmp_path):
+    root = write_repo(tmp_path, {**SHOP, "shop/py2.py": "print 'x'\n"})
+    (root / "shop" / "zero.py").symlink_to("/dev/zero")
+    assert "shop.sync" in build_graph(root, ["shop"]).modules

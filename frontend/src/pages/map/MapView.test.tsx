@@ -67,3 +67,43 @@ test("Enter opens the selected file", async () => {
   await userEvent.keyboard("j{Enter}");
   expect(onOpenFile).toHaveBeenCalledWith("shop/sync.py");
 });
+
+
+const withDependent = {
+  ...ready,
+  nodes: [...ready.nodes, { id: "shop/tasks.py", hop: 1, phase: "core", inGraph: true, references: ["send"] }],
+};
+
+test("j follows the rows as shown: a phase's dependents come before the next phase", async () => {
+  renderMap(withDependent);
+  await screen.findAllByTestId("path-row");
+  const order: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    await userEvent.keyboard("j");
+    order.push(document.querySelector(".map-row.sel")!.getAttribute("data-path")!);
+  }
+  expect(order).toEqual(["shop/sync.py", "shop/tasks.py", "README.md"]);
+});
+
+test("x does nothing on a file that isn't in the PR", async () => {
+  localStorage.clear();
+  renderMap(withDependent);
+  await screen.findAllByTestId("path-row");
+  await userEvent.keyboard("jjx");
+  expect(screen.getByText("Reviewed 0 of 2 files")).toBeInTheDocument();
+});
+
+test("Enter on a focused button presses the button, not the selected file", async () => {
+  const { onOpenFile } = renderMap({ status: "error", headSha: "abc1234", message: "Nope" });
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  retry.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(onOpenFile).not.toHaveBeenCalled();
+});
+
+test("a file that isn't in the PR links to GitHub", async () => {
+  renderMap(withDependent);
+  const link = await screen.findByRole("link", { name: /tasks\.py/ });
+  expect(link).toHaveAttribute("href", "https://github.com/o/r/blob/abc1234/shop/tasks.py");
+  expect(link).toHaveAttribute("target", "_blank");
+});

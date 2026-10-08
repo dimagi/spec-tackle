@@ -366,7 +366,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
           page={page} pr={pr} head={activity.headSha} onOpenFile={(path) => store.getState().openFileChanges(path)}
           renderGraph={(g) => (
             <Suspense fallback={<div className="grid h-full place-items-center text-sm text-stone-500">Loading graph…</div>}>
-              <MapGraph {...g} onOpen={(path) => store.getState().openFileChanges(path)} />
+              <MapGraph {...g} />
             </Suspense>
           )}
         />

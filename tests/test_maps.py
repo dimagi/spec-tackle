@@ -192,3 +192,15 @@ def test_a_claude_failure_comes_back_as_a_readable_error(claude_app, tmp_path, m
 
     assert response.status_code == 502
     assert response.json()["detail"]
+
+
+def test_an_unreadable_narration_is_an_error_and_not_cached(claude_app, tmp_path):
+    app.state.maps = cached_map(tmp_path)
+    claude_app.fake_ask.answer = "Sorry, I can't help with that."
+
+    first = claude_app.post("/api/pr/o/r/7/map/narrate")
+    claude_app.fake_ask.answer = '{"shop/sync.py": "Adds retries."}'
+    second = claude_app.post("/api/pr/o/r/7/map/narrate")
+
+    assert first.status_code == 502
+    assert second.json() == {"shop/sync.py": "Adds retries."}

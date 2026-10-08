@@ -148,3 +148,11 @@ def test_without_a_base_nothing_is_removed_or_re_signed():
 def test_unparseable_head_raises():
     with pytest.raises(SyntaxError):
         changed_symbols("", "def (:\n", {1}, set())
+
+
+def test_form_feeds_dont_shift_line_numbers():
+    base = "import os\n\x0c\n\ndef f(a):\n    return a\n\n\ndef g():\n    return 1\n"
+    head = "import os\n\x0c\n\ndef f(a, b):\n    return a\n\n\ndef g():\n    return 1\n"
+    patch = "@@ -1,7 +1,7 @@\n import os\n \x0c\n \n-def f(a):\n+def f(a, b):\n     return a\n \n "
+    assert base_text(head, patch, "modified") == base
+    assert changed_lines(patch) == ({4}, {4})
