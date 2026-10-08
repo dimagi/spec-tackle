@@ -27,6 +27,7 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
   const m = MODES[mode];
   const [text, setText] = useState(mode === "claude" ? "" : quoteText);
   const [preview, setPreview] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
 
@@ -42,6 +43,16 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
       setText((t) => t || quoteText);
     }
   }, [mode, quoteText]);
+
+  // A new selection in the same block: quote it, unless the reviewer has written something.
+  const lastQuote = useRef(quoteText);
+  useEffect(() => {
+    if (lastQuote.current === quoteText) return;
+    const previous = lastQuote.current;
+    lastQuote.current = quoteText;
+    if (mode === "comment") setText((t) => (!t.trim() || t === previous ? quoteText : t));
+    textarea.current?.focus({ preventScroll: true });
+  }, [quoteText, mode]);
 
   useEffect(() => {
     onDirtyChange(!!text.trim() && text.trim() !== quoteText.trim());
@@ -78,11 +89,12 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
 
   const showPreview = async () => {
     setPreview("");
+    setPreviewError(null);
     try {
       const { html } = await request<{ html: string }>("POST", `${api}/preview`, { body: text || "_Nothing to preview_" });
       setPreview(html);
     } catch (err) {
-      setPreview(`<p>${(err as Error).message}</p>`);
+      setPreviewError((err as Error).message);
     }
   };
 
@@ -123,10 +135,12 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
             }
           }}
         />
-        {preview !== null && (
+        {preview !== null && (previewError !== null ? (
+          <div className="preview comment-body prose prose-stone prose-sm max-w-none dark:prose-invert">{previewError}</div>
+        ) : (
           <div className="preview comment-body prose prose-stone prose-sm max-w-none dark:prose-invert"
             dangerouslySetInnerHTML={{ __html: preview || '<span class="text-stone-400">Rendering…</span>' }} />
-        )}
+        ))}
         <div className="mt-2 flex items-center gap-2">
           <span className="composer-help text-[11px] text-stone-400">{m.help}</span>
           <span className="flex-1" />

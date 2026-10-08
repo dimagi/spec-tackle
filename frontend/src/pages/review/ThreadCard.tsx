@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Comment, Thread } from "../../api/types";
 import { RelativeTime } from "../../components/RelativeTime";
+import { externalLinks } from "../../lib/links";
 import { rangeLabel, threadRange } from "../../lib/threads";
 
 export type ThreadCardProps = {
@@ -24,9 +25,6 @@ const textOf = (html: string) => {
   return (div.textContent ?? "").replace(/\s+/g, " ").trim();
 };
 
-/** Links in comments open in a new tab. */
-const externalLinks = (el: HTMLElement | null) =>
-  el?.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
 
 function CommentView({ c, fresh, expanded, onExpand }: { c: Comment; fresh: boolean; expanded: boolean; onExpand: () => void }) {
   const body = useRef<HTMLDivElement>(null);

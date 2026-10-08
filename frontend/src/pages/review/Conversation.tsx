@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ConversationItem } from "../../api/types";
 import { Html } from "../../components/Html";
 import { RelativeTime } from "../../components/RelativeTime";
+import { externalLinks } from "../../lib/links";
 
 const VERDICTS: Record<string, string> = { APPROVED: "approved", CHANGES_REQUESTED: "requested changes", COMMENTED: "reviewed", DISMISSED: "review dismissed" };
 
@@ -11,6 +12,8 @@ export function Conversation({ items, fresh, hideBots, onPost }: Props) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const shown = items.filter((c) => !(hideBots && c.author.isBot));
+  const list = useRef<HTMLOListElement>(null);
+  useLayoutEffect(() => externalLinks(list.current));
 
   const submit = async () => {
     const body = text.trim();
@@ -29,7 +32,7 @@ export function Conversation({ items, fresh, hideBots, onPost }: Props) {
   return (
     <section id="conversation" className="paper px-8 py-6 sm:px-12">
       <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-stone-500">Conversation</h2>
-      <ol className="space-y-4">
+      <ol ref={list} className="space-y-4">
         {shown.length ? shown.map((c) => (
           <li key={c.id} className="convo-item">
             <img src={c.author.avatarUrl} alt="" />

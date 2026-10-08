@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import type { ClaudeMessage, ClaudeThread } from "../../api/types";
 import { RelativeTime } from "../../components/RelativeTime";
+import { externalLinks } from "../../lib/links";
 import { rangeLabel } from "../../lib/threads";
 import type { Live } from "./hooks/claudeStream";
 import { ReplyBox } from "./ReplyBox";
@@ -17,7 +18,7 @@ type Props = {
 function Message({ m }: { m: ClaudeMessage }) {
   const body = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    body.current?.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+    externalLinks(body.current, "noopener noreferrer");
   }, [m.bodyHTML]);
   if (m.role === "user") {
     return (

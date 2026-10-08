@@ -104,18 +104,20 @@ export function useMarginEngine(
     requestAnimationFrame(() => { queued.current = false; layout(); });
   }, [layout]);
 
+  // Created on first use, so cards are observed from the first render on.
+  const observer = useRef<ResizeObserver | null>(null);
+  const getObserver = () => (observer.current ??= new ResizeObserver(() => scheduleLayout()));
+
   // After every render: re-mark anchors and re-place cards.
   useLayoutEffect(() => {
     markAnchors();
     layout();
     const margin = marginRef.current;
-    if (margin) for (const card of margin.querySelectorAll(":scope > [data-card]")) observer.current?.observe(card);
+    if (margin) for (const card of margin.querySelectorAll(":scope > [data-card]")) getObserver().observe(card);
   });
 
-  const observer = useRef<ResizeObserver | null>(null);
   useEffect(() => {
-    observer.current = new ResizeObserver(scheduleLayout);
-    if (docRef.current) observer.current.observe(docRef.current);
+    if (docRef.current) getObserver().observe(docRef.current);
     const doc = docRef.current;
     const onLoad = (e: Event) => { if ((e.target as Element).tagName === "IMG") scheduleLayout(); };
     doc?.addEventListener("load", onLoad, true);
@@ -124,6 +126,7 @@ export function useMarginEngine(
     document.fonts?.ready.then(scheduleLayout);
     return () => {
       observer.current?.disconnect();
+      observer.current = null;
       doc?.removeEventListener("load", onLoad, true);
       window.removeEventListener("resize", scheduleLayout);
       window.removeEventListener("spec-tackle:layout", scheduleLayout);

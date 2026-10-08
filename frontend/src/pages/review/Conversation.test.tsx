@@ -28,3 +28,10 @@ test("posting a general comment clears the form", async () => {
   expect(onPost).toHaveBeenCalledWith("Thanks!");
   expect(screen.getByRole("textbox")).toHaveValue("");
 });
+
+test("links in comments open in a new tab", () => {
+  render(<Conversation items={[item({ bodyHTML: '<p>See <a href="https://example.com">this</a></p>' })]} fresh={new Set()} hideBots={false} onPost={vi.fn()} />);
+  const link = screen.getByRole("link", { name: "this" });
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener");
+});

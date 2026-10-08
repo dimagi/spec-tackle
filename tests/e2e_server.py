@@ -8,15 +8,22 @@ from __future__ import annotations
 import asyncio
 import itertools
 import sys
+import tempfile
 from pathlib import Path
 
 import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from spec_tackle import claude_api  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
+from spec_tackle.auth import NotSignedIn  # noqa: E402
+from spec_tackle.claude import Event  # noqa: E402
+from spec_tackle.store import Store  # noqa: E402
+from spec_tackle.turns import TurnRunner  # noqa: E402
 
 PORT = 8799
+DATA = Path(tempfile.mkdtemp(prefix="spec-tackle-e2e-"))
 HEAD = "e2e0000headsha"
 DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff.\n\n## Limits\n\nAt most five tries.\n"
 ME = {"__typename": "User", "login": "me", "avatarUrl": ""}
@@ -40,13 +47,14 @@ class FakeGitHub:
     token = "e2e"
 
     def __init__(self):
+        self.head = HEAD
         self.threads = [thread(5, comment(ANN, "How long is the backoff?"))]
         self.conversation: list[dict] = []
         self.reviews: list[dict] = []
         self.posted: list[dict] = []
 
     def _activity(self) -> dict:
-        return {"headRefOid": HEAD, "state": "OPEN", "isDraft": False, "merged": False, "viewer": {"login": "me", "avatarUrl": ""},
+        return {"headRefOid": self.head, "state": "OPEN", "isDraft": False, "merged": False, "viewer": {"login": "me", "avatarUrl": ""},
                 "reviewThreads": {"nodes": self.threads}, "comments": {"nodes": self.conversation},
                 "reviews": {"nodes": self.reviews}}
 
@@ -103,12 +111,15 @@ class FakeSession:
     def __init__(self):
         self.gh = FakeGitHub()
         self.login = None
+        self.signed_in = True
 
     async def client(self):
+        if not self.signed_in:
+            raise NotSignedIn()
         return self.gh
 
     async def viewer(self):
-        return {"login": "me", "name": None, "avatarUrl": ""}
+        return {"login": "me", "name": None, "avatarUrl": ""} if self.signed_in else None
 
     async def token(self):
         return "e2e"
@@ -127,10 +138,49 @@ async def posted():
     return {"comments": gh.posted, "threads": gh.threads}
 
 
+@app.post("/e2e/push")
+async def push():
+    """Someone force-pushes: the PR's head moves on."""
+    app.state.session.gh.head = "e2e1111newhead"
+    return {"ok": True}
+
+
+@app.post("/e2e/signout")
+async def signout():
+    """GitHub stops accepting the token."""
+    app.state.session.signed_in = False
+    return {"ok": True}
+
+
+class FakeCheckouts:
+    def has_clone(self, *, owner, repo):
+        return True
+
+    async def worktree(self, *, owner, repo, sha, token):
+        path = DATA / "wt" / sha / "docs"
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "retry.md").write_text(DOC)
+        return path.parent
+
+
+ANSWER = " ".join(["Retries back off exponentially from one second, doubling each time."] * 12)
+
+
+async def fake_ask(**kwargs):
+    """Claude, streaming a long answer over about 1.5 seconds."""
+    yield Event(kind="tool", text="Reading docs/retry.md")
+    for word in ANSWER.split(" "):
+        await asyncio.sleep(0.015)
+        yield Event(kind="text", text=word + " ")
+    yield Event(kind="done", text=ANSWER, session_id="e2e")
+
+
 @app.post("/e2e/reset")
 async def reset():
     """Start each test from the same PR."""
     app.state.session = FakeSession()
+    app.state.store.close()
+    app.state.store = Store.open(DATA / f"state-{next(ids)}.db")
     return {"ok": True}
 
 
@@ -140,7 +190,11 @@ async def main():
     while not server.started:
         await asyncio.sleep(0.05)
     app.state.session = FakeSession()
-    app.state.claude_cli = None
+    app.state.store = Store.open(DATA / "state.db")
+    app.state.claude_cli = "/fake/claude"
+    app.state.checkouts = FakeCheckouts()
+    app.state.turns = TurnRunner()
+    claude_api.claude.ask = fake_ask
     await serving
 
 

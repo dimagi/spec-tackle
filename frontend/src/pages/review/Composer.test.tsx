@@ -60,3 +60,32 @@ test("⌘↵ submits the trimmed text; empty text doesn't", async () => {
   await userEvent.type(box, "  Fix this  {Meta>}{Enter}{/Meta}");
   expect(props.onSubmit).toHaveBeenCalledWith("Fix this", "comment");
 });
+
+test("selecting a phrase in the block the composer is already open on quotes it", () => {
+  const { props, rerender } = renderComposer({ target: { path: "docs/a.md", start: 2, end: 3, quote: null, mode: "comment" } });
+  expect(screen.getByRole("textbox")).toHaveValue("");
+
+  rerender(<Composer {...props} target={{ ...props.target, quote: "three" }} />);
+
+  expect(screen.getByRole("textbox")).toHaveValue("> three\n\n");
+});
+
+test("a new selection doesn't overwrite text the reviewer wrote", async () => {
+  const { props, rerender } = renderComposer({ target: { path: "docs/a.md", start: 2, end: 3, quote: null, mode: "comment" } });
+  await userEvent.type(screen.getByRole("textbox"), "My point");
+
+  rerender(<Composer {...props} target={{ ...props.target, quote: "three" }} />);
+
+  expect(screen.getByRole("textbox")).toHaveValue("My point");
+});
+
+test("a preview error is shown as text, never as HTML", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "<img src=x onerror=alert(1)>" }), { status: 502 })));
+  const { container } = renderComposer();
+
+  await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+  expect(await screen.findByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
+  expect(container.querySelector(".preview img")).toBeNull();
+  vi.unstubAllGlobals();
+});
