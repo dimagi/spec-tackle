@@ -6,9 +6,19 @@ export type FileView = "rendered" | "diff";
 
 type Props = { file: PageFile; index: number; onViewChange?: (path: string, view: FileView) => void };
 
+/** Whether a file can switch between Document and Changes. */
+export function hasViewToggle(file: PageFile): boolean {
+  return !!(file.rendered && file.diff && !file.wholeFile);
+}
+
+/** A file opens on its changes when it has both views, otherwise on whichever it has. */
+export function defaultView(file: PageFile): FileView {
+  return file.rendered && !hasViewToggle(file) ? "rendered" : "diff";
+}
+
 export function FileSection({ file, index, onViewChange }: Props) {
-  const [view, setView] = useState<FileView>(file.rendered ? "rendered" : "diff");
-  const toggle = !!(file.rendered && file.diff && !file.wholeFile);
+  const toggle = hasViewToggle(file);
+  const [view, setView] = useState<FileView>(defaultView(file));
   const pick = (v: FileView) => {
     setView(v);
     onViewChange?.(file.path, v);

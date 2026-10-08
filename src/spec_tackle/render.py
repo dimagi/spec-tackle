@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import posixpath
 import re
-from html import escape
+from html import escape, unescape
 from urllib.parse import quote
 
 from markdown_it import MarkdownIt
@@ -302,7 +302,7 @@ def outline(html: str) -> list[dict]:
             "level": int(level),
             "line": int(line),
             "id": anchor,
-            "text": re.sub(r"<[^>]+>", "", inner),
+            "text": unescape(re.sub(r"<[^>]+>", "", inner)),
         }
         for level, line, anchor, inner in pattern.findall(html)
     ]
