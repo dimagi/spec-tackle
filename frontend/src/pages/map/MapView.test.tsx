@@ -107,3 +107,14 @@ test("a file that isn't in the PR links to GitHub", async () => {
   expect(link).toHaveAttribute("href", "https://github.com/o/r/blob/abc1234/shop/tasks.py");
   expect(link).toHaveAttribute("target", "_blank");
 });
+
+test("Enter still opens the file when focus is on a control outside the Map (e.g. the Map tab)", async () => {
+  const { onOpenFile } = renderMap(ready);
+  await screen.findAllByTestId("path-row");
+  const tab = document.body.appendChild(document.createElement("button"));
+  tab.textContent = "Map";
+  tab.focus();
+  await userEvent.keyboard("j{Enter}");
+  expect(onOpenFile).toHaveBeenCalledWith("shop/sync.py");
+  tab.remove();
+});

@@ -46,7 +46,7 @@ export function MapView({ page, pr, head, onOpenFile, renderGraph }: Props) {
       if ((e.target as Element).closest?.("input, textarea, dialog") || e.metaKey || e.ctrlKey || e.altKey) return;
       const { order, selected, toggle, open, inPR } = keys.current;
       if (!order.length) return;
-      const onControl = !!(e.target as Element).closest?.("button, a, select");
+      const onControl = !!(e.target as Element).closest?.(".map-view button, .map-view a, .map-view select");
       const i = selected ? order.indexOf(selected) : -1;
       if (e.key === "j") setSelected(order[Math.min(order.length - 1, i + 1)]);
       else if (e.key === "k") setSelected(order[Math.max(0, i - 1)]);
