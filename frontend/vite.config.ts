@@ -13,7 +13,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    proxy: { "/api": backend, "/auth": backend, "/raw": backend, "/static/app": backend },
+    proxy: { "/api": backend, "/auth": backend, "/raw": backend, "/static/favicon.svg": backend },
   },
   test: {
     environment: "jsdom",

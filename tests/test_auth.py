@@ -52,28 +52,17 @@ def signed_out(monkeypatch):
         yield client
 
 
-def test_home_page_offers_sign_in_when_signed_out(signed_out):
-    html = signed_out.get("/").text
-    assert "Sign in to GitHub to start" in html
-    assert "Not signed in" in html
-    assert 'name="url"' not in html  # the PR link box waits until you're signed in
-
-
-def test_review_page_sends_you_to_sign_in_and_back(signed_out):
-    response = signed_out.get("/pr/o/r/1")
-    assert response.status_code == 401
-    assert "Sign in to GitHub to start" in response.text
-    assert '"/pr/o/r/1"' in response.text  # where to return after signing in
+def test_pages_load_when_signed_out(signed_out):
+    # The app asks /api/session and shows sign-in itself.
+    assert signed_out.get("/").status_code == 200
+    assert signed_out.get("/pr/o/r/1").status_code == 200
+    assert signed_out.get("/api/session").json()["viewer"] is None
 
 
 def test_api_says_signed_out(signed_out):
     response = signed_out.get("/api/pr/o/r/1/activity")
     assert response.status_code == 401
     assert response.json()["signedOut"] is True
-
-
-def test_next_only_returns_to_this_app(signed_out):
-    assert "evil.example" not in signed_out.get("/?next=//evil.example/x").text
 
 
 def test_session_token_returns_the_signed_in_token(monkeypatch):

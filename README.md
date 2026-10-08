@@ -57,4 +57,15 @@ uv run pytest
 
 Local state (saved drafts, Ask Claude threads, repo checkouts) lives in `~/.local/share/spec-tackle/`.
 
-FastAPI + Jinja (`src/spec_tackle/app.py`), GitHub GraphQL/REST client (`github.py`), markdown→line-mapped HTML (`render.py`), vanilla JS UI with Tailwind (`static/`).
+FastAPI JSON API (`src/spec_tackle/app.py`, page data in `pages.py`), GitHub GraphQL/REST client (`github.py`), markdown→line-mapped HTML (`render.py`). The UI is React + TypeScript + Tailwind in `frontend/`, built into `src/spec_tackle/static/dist/`. The build is committed, so installing spec-tackle needs no Node.
+
+Working on the UI (needs Node 20+):
+
+```bash
+cd frontend
+npm install
+npm run dev        # Vite on :5173, proxying the API to spec-tackle on :8765
+npm test           # unit and component tests
+npm run e2e        # Playwright checks against a fake GitHub
+npm run build      # rebuild the committed bundle; `uv run pytest` fails if you forget
+```

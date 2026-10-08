@@ -7,12 +7,11 @@ import mimetypes
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from . import claude, claude_api, pages, render
@@ -24,7 +23,6 @@ from .turns import TurnRunner
 
 HERE = Path(__file__).parent
 SPA_SHELL = HERE / "static" / "dist" / "index.html"
-templates = Jinja2Templates(directory=HERE / "templates")
 
 
 @asynccontextmanager
@@ -93,12 +91,7 @@ async def github_error(request: Request, exc: GitHubError):
         # GitHub rejected the token (revoked or expired): sign out so the page offers sign-in.
         await session(request).drop()
         exc = NotSignedIn("GitHub no longer accepts your sign-in. Please sign in again.")
-    if request.url.path.startswith(("/api/", "/auth/")):
-        return JSONResponse({"error": str(exc), "signedOut": signed_out}, status_code=exc.status)
-    return await index_page(
-        request, error=None if signed_out else str(exc), notice=str(exc) if signed_out else None,
-        next_url=request.url.path, status_code=exc.status,
-    )
+    return JSONResponse({"error": str(exc), "signedOut": signed_out}, status_code=exc.status)
 
 
 def session(request: Request) -> Session:
@@ -109,57 +102,7 @@ async def gh(request: Request) -> GitHub:
     return await session(request).client()
 
 
-async def index_page(request: Request, *, status_code: int = 200, **context) -> HTMLResponse:
-    viewer = await session(request).viewer()
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {"viewer": viewer, "gh_cli": LoginFlow.available(), **context},
-        status_code=status_code,
-    )
-
-
 # -- pages -----------------------------------------------------------------
-
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request, url: str | None = None, next: str | None = None):
-    if url:
-        try:
-            pr = parse_pr_url(url)
-        except ValueError as exc:
-            return await index_page(request, error=str(exc), url=url, status_code=400)
-        return RedirectResponse(f"/pr/{pr.path}", status_code=303)
-    # Only ever send people back to a page on this app.
-    next_url = next if next and next.startswith("/") and not next.startswith("//") else None
-    return await index_page(request, next_url=next_url)
-
-
-@app.get("/pr/{owner}/{repo}/{number}", response_class=HTMLResponse)
-async def review_page(request: Request, owner: str, repo: str, number: int):
-    pr = PRRef(owner, repo, number)
-    page = await pages.build_page(await gh(request), pr)
-    overview, built, activity = page["overview"], page["files"], page["activity"]
-    client_files = {
-        f["path"]: {"hunks": f["hunks"], "wholeFile": f["wholeFile"], "markdown": f["markdown"]}
-        for f in built
-    }
-    return templates.TemplateResponse(
-        request,
-        "review.html",
-        {
-            "pr": pr,
-            "viewer": await session(request).viewer(),
-            "overview": overview,
-            "files": built,
-            "boot": {
-                "pr": {"owner": owner, "repo": repo, "number": number, "url": overview["url"]},
-                "files": client_files,
-                "activity": activity,
-                "claude": bool(request.app.state.claude_cli),
-            },
-        },
-    )
 
 
 def spa_shell() -> FileResponse:
@@ -167,13 +110,19 @@ def spa_shell() -> FileResponse:
     return FileResponse(SPA_SHELL, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/next/")
-async def next_index():
+@app.get("/")
+async def index(url: str | None = None):
+    if url:
+        try:
+            pr = parse_pr_url(url)
+        except ValueError as exc:
+            return RedirectResponse(f"/?{urlencode({'error': str(exc), 'url': url})}", status_code=303)
+        return RedirectResponse(f"/pr/{pr.path}", status_code=303)
     return spa_shell()
 
 
-@app.get("/next/pr/{owner}/{repo}/{number}")
-async def next_review(owner: str, repo: str, number: int):
+@app.get("/pr/{owner}/{repo}/{number}")
+async def review_page(owner: str, repo: str, number: int):
     return spa_shell()
 
 

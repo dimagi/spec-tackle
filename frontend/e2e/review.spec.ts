@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const PAGE = "/next/pr/o/r/7";
+const PAGE = "/pr/o/r/7";
 
 test.beforeEach(async ({ request }) => {
   await request.post("/e2e/reset");
@@ -61,25 +61,3 @@ test("dark theme", async ({ page }) => {
   await expect(page.locator("html")).toHaveClass(/dark/);
 });
 
-test("lays out like the old UI", async ({ page }) => {
-  const measure = async (url: string) => {
-    await page.goto(url);
-    const card = page.locator(".thread-card", { hasText: "How long is the backoff?" });
-    await expect(card).toBeVisible();
-    await page.waitForTimeout(500); // fonts and card transitions settle
-    const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
-    return {
-      heading: await box(".view:not([hidden]) h1"),
-      anchor: await box(".view:not([hidden]) .has-thread"),
-      card: (await card.boundingBox())!,
-      description: await box("#description"),
-    };
-  };
-  const before = await measure("/pr/o/r/7");
-  const after = await measure(PAGE);
-  for (const key of Object.keys(before) as (keyof typeof before)[]) {
-    expect.soft(Math.abs(after[key].x - before[key].x), `${key}.x`).toBeLessThan(4);
-    expect.soft(Math.abs(after[key].y - before[key].y), `${key}.y`).toBeLessThan(12);
-    expect.soft(Math.abs(after[key].width - before[key].width), `${key}.width`).toBeLessThan(4);
-  }
-});
