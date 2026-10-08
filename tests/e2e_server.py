@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -15,7 +16,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from spec_tackle import claude_api  # noqa: E402
+from spec_tackle import claude_api, logic  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
 from spec_tackle.auth import NotSignedIn  # noqa: E402
 from spec_tackle.claude import Event  # noqa: E402
@@ -183,8 +184,29 @@ class FakeCheckouts:
 ANSWER = " ".join(["Retries back off exponentially from one second, doubling each time."] * 12)
 
 
+LOGIC_MAP = {
+    "summary": "Failed form submissions are retried with backoff, at most five times.",
+    "blocks": [
+        {"id": "send", "label": "Form is sent", "kind": "entry", "change": "unchanged", "next": [{"to": "retry"}]},
+        {"id": "retry", "label": "Retry failures", "kind": "loop", "change": "added", "next": [{"to": "give-up", "label": "5 tries"}],
+         "children": [
+             {"id": "backoff", "label": "Back off and resend", "kind": "step", "change": "added", "next": [],
+              "functions": [{"path": "docs/retry.md", "symbol": "Retry policy", "start": 5, "end": 5}]},
+         ]},
+        {"id": "give-up", "label": "Give up", "kind": "exit", "change": "added", "next": [],
+         "functions": [{"path": "docs/retry.md", "symbol": "Limits", "start": 7, "end": 9}]},
+    ],
+}
+
+
 async def fake_ask(**kwargs):
-    """Claude, streaming a long answer over about 1.5 seconds."""
+    """Claude, streaming a long answer over about 1.5 seconds; or a logic map, for the Logic view."""
+    if kwargs.get("system") == logic.LOGIC_SYSTEM_PROMPT:
+        yield Event(kind="tool", text="Reading docs/retry.md")
+        await asyncio.sleep(0.3)
+        answer = f"```json\n{json.dumps(LOGIC_MAP)}\n```"
+        yield Event(kind="done", text=answer, session_id="e2e-logic")
+        return
     yield Event(kind="tool", text="Reading docs/retry.md")
     for word in ANSWER.split(" "):
         await asyncio.sleep(0.015)
