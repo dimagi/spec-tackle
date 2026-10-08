@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from spec_tackle.app import app
 from spec_tackle.github import GitHub, GitHubError
 
@@ -63,3 +65,44 @@ def test_endpoint_when_signed_out_says_so(web_app):
 
     assert response.status_code == 401
     assert response.json()["signedOut"] is True
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+
+def test_review_requests_keeps_results_when_some_orgs_error(monkeypatch):
+    """A token not SSO-authorized for one org gets partial data plus errors; show what came back."""
+    client = GitHub("tok")
+
+    async def fake_request(method, url, **kwargs):
+        return FakeResponse({
+            "data": {"search": {"nodes": [pull(3, "2026-10-01T00:00:00Z"), None]}},
+            "errors": [{"message": "Resource protected by organization SAML enforcement."}],
+        })
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    try:
+        result = asyncio.run(client.review_requests())
+    finally:
+        asyncio.run(client.aclose())
+
+    assert [p["number"] for p in result] == [3]
+
+
+def test_review_requests_raises_when_search_failed_outright(monkeypatch):
+    client = GitHub("tok")
+
+    async def fake_request(method, url, **kwargs):
+        return FakeResponse({"data": None, "errors": [{"message": "Something went wrong"}]})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    try:
+        with pytest.raises(GitHubError, match="Something went wrong"):
+            asyncio.run(client.review_requests())
+    finally:
+        asyncio.run(client.aclose())

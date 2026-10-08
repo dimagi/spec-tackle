@@ -152,12 +152,13 @@ class GitHub:
             raise GitHubError(message, status=response.status_code)
         return response
 
-    async def _graphql(self, query: str, **variables) -> dict:
+    async def _graphql(self, query: str, *, partial: bool = False, **variables) -> dict:
+        """Run a query; with `partial`, return whatever data came back alongside errors."""
         response = await self._request(
             "POST", "/graphql", json={"query": query, "variables": variables}
         )
         payload = response.json()
-        if payload.get("errors"):
+        if payload.get("errors") and not (partial and payload.get("data")):
             raise GitHubError("; ".join(e["message"] for e in payload["errors"]), 502)
         return payload["data"]
 
@@ -198,7 +199,8 @@ class GitHub:
 
     async def review_requests(self) -> list[dict]:
         """Open PRs waiting on the viewer's review, most recently updated first."""
-        data = await self._graphql(_REVIEW_REQUESTS_QUERY)
+        # Orgs the token isn't SSO-authorized for add errors; keep the rest of the results.
+        data = await self._graphql(_REVIEW_REQUESTS_QUERY, partial=True)
         pulls = [
             {
                 "owner": node["repository"]["owner"]["login"],
