@@ -16,7 +16,7 @@ import { ReviewPageCtx, type ReviewPageContext } from "./context";
 import { Conversation } from "./Conversation";
 import { FinishReview, type ReviewEvent } from "./FinishReview";
 import { Description } from "./Description";
-import { FileSection } from "./FileSection";
+import { defaultView, FileSection, type FileView } from "./FileSection";
 import { useClaudeStreams } from "./hooks/claudeStream";
 import { useKeyboard } from "./hooks/useKeyboard";
 import type { MarginEngine } from "./hooks/useMarginEngine";
@@ -70,8 +70,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     return s;
   });
   const seenRef = useRef(seenState);
-  // Bumped when a file switches Document/Changes, so margin anchors are recomputed.
-  const [, setViewVersion] = useState(0);
+  // Each file's Document/Changes choice; changing it also re-renders, so margin anchors are recomputed.
+  const [viewChoices, setViewChoices] = useState<Record<string, FileView>>({});
   const [signedOut, setSignedOut] = useState(false);
   const unreadWhileHidden = useRef(0);
   const filter = useReview((s) => s.filter);
@@ -142,6 +142,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   const visibleThreads = activity.threads.filter((t) => !(hideBots && isBotThread(t)));
   const stats = { open: visibleThreads.filter((t) => !t.isResolved).length, resolved: visibleThreads.filter((t) => t.isResolved).length };
   const counts = headingCounts(page.files, activity.threads, filters);
+  const views = Object.fromEntries(page.files.map((f) => [f.path, viewChoices[f.path] ?? defaultView(f)]));
   const conversationCount = activity.conversation.filter((c) => !(hideBots && c.author.isBot)).length;
 
   const markSeen = (id: number) => {
@@ -344,7 +345,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         onFinishReview={() => setReviewOpen(true)}
       />
       <div className="flex">
-        <Rail files={page.files} claude={page.claude} stats={stats} headingCounts={counts}
+        <Rail files={page.files} views={views} claude={page.claude} stats={stats} headingCounts={counts}
           conversationCount={conversationCount} onStep={step} />
         <div className="min-w-0 flex-1 px-4 py-8 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] gap-6">
@@ -355,7 +356,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
               })} />
               <Description overview={page.overview} />
               {page.files.map((file, i) => (
-                <FileSection key={file.path} file={file} index={i + 1} onViewChange={() => setViewVersion((v) => v + 1)} />
+                <FileSection key={file.path} file={file} index={i + 1} onViewChange={(path, view) => setViewChoices((v) => ({ ...v, [path]: view }))} />
               ))}
               <Conversation items={activity.conversation} fresh={seenState.fresh} hideBots={hideBots} onPost={postConversation} />
             </main>
