@@ -6,6 +6,8 @@ export type KeyHandlers = {
   reply: () => void;
   /** c / a on a text selection; return true if handled. */
   comment?: (mode: "comment" | "claude") => boolean;
+  /** p: open the PR switcher. */
+  switcher?: () => void;
 };
 
 /** Page shortcuts; ignored while typing or in a dialog, and with modifier keys. */
@@ -20,6 +22,7 @@ export function useKeyboard(handlers: KeyHandlers) {
       else if (e.key === "k") h.step(-1);
       else if ((e.key === "c" || e.key === "a") && h.comment?.(e.key === "c" ? "comment" : "claude")) e.preventDefault();
       else if (e.key === "r") { e.preventDefault(); h.reply(); }
+      else if (e.key === "p" && h.switcher) { e.preventDefault(); h.switcher(); }
       else if (e.key === "Escape") h.escape();
     };
     document.addEventListener("keydown", onKey);

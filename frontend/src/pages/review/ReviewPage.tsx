@@ -8,6 +8,7 @@ import { Toaster } from "../../components/Toaster";
 import { applyActivity, initialSeen, type SeenState } from "../../lib/activity";
 import { headingCounts, isBotThread, isShown, stepThread } from "../../lib/threads";
 import { createReviewStore, ReviewStoreContext, useReview, useReviewStore, type ComposerTarget } from "../../state/review";
+import { recordRecent } from "../../state/recents";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 import { toast } from "../../state/toasts";
 import { setResolved } from "./actions";
@@ -23,6 +24,7 @@ import type { MarginEngine } from "./hooks/useMarginEngine";
 import { useMermaid } from "./hooks/useMermaid";
 import { Margin } from "./Margin";
 import { GutterButton } from "./GutterButton";
+import { PrSwitcher } from "./PrSwitcher";
 import { Rail } from "./Rail";
 import { ReplyBox } from "./ReplyBox";
 import { SelectionButton, useSelection } from "./SelectionButton";
@@ -73,6 +75,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   // Each file's Document/Changes choice; changing it also re-renders, so margin anchors are recomputed.
   const [viewChoices, setViewChoices] = useState<Record<string, FileView>>({});
   const [signedOut, setSignedOut] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const unreadWhileHidden = useRef(0);
   const filter = useReview((s) => s.filter);
   const hideBots = useReview((s) => s.hideBots);
@@ -85,6 +88,10 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   useEffect(() => {
     document.title = `${page.overview.title} · #${pr.number}`;
   }, [page.overview.title, pr.number]);
+
+  useEffect(() => {
+    recordRecent({ ...pr, title: page.overview.title });
+  }, [pr, page.overview.title]);
 
   // GitHub stopped accepting the sign-in: say so once, and offer a way back here after signing in.
   useEffect(() => {
@@ -158,8 +165,12 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   const api = apiBase(pr);
   const fail = (err: unknown) => toast((err as Error).message, { kind: "error", timeout: 8000 });
 
+  /** True unless the composer holds unsent text the reviewer wants to keep. */
+  const confirmDiscard = () =>
+    !(store.getState().composer && composerDirty.current) || confirm("Discard your unsent text?");
+
   const openComposer = (target: ComposerTarget) => {
-    if (store.getState().composer && composerDirty.current && !confirm("Discard your unsent text?")) return;
+    if (!confirmDiscard()) return;
     composerDirty.current = false;
     clearSelection();
     store.getState().openComposer(target);
@@ -301,6 +312,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       activate(null);
     },
     comment: commentOnSelection,
+    switcher: () => setSwitcherOpen(true),
     reply: () => {
       if (!active) return;
       document.querySelector<HTMLTextAreaElement>(`[data-card="${CSS.escape(active)}"] .thread-reply textarea`)?.focus();
@@ -343,6 +355,10 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         newCommits={activity.headSha !== renderedSha}
         onRefresh={() => live.refresh()}
         onFinishReview={() => setReviewOpen(true)}
+        switcher={
+          <PrSwitcher current={{ ...pr, title: page.overview.title }} open={switcherOpen}
+            onOpenChange={setSwitcherOpen} beforeLeave={confirmDiscard} />
+        }
       />
       <div className="flex">
         <Rail files={page.files} views={views} claude={page.claude} stats={stats} headingCounts={counts}
