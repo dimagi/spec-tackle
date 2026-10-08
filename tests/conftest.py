@@ -118,13 +118,15 @@ class FakeAsk:
         self.calls = []
         self.delay = 0.05
         self.answer = "The answer."
+        self.answers = []  # consumed one per call before falling back to `answer`
 
     async def __call__(self, **kwargs):
         self.calls.append(kwargs)
         yield Event(kind="tool", text="Reading docs/a.md")
         await asyncio.sleep(self.delay)
         yield Event(kind="text", text="The ")
-        yield Event(kind="done", text=self.answer, session_id=f"sess-{len(self.calls)}")
+        answer = self.answers.pop(0) if self.answers else self.answer
+        yield Event(kind="done", text=answer, session_id=f"sess-{len(self.calls)}")
 
 
 @pytest.fixture
