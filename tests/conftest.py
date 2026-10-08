@@ -55,6 +55,15 @@ class FakeGitHub:
     async def raw_file(self, owner, repo, path, ref):
         return b"# Title\n\ntwo\nthree\n"
 
+    async def repos(self, query=""):
+        self.repo_queries = [*getattr(self, "repo_queries", []), query]
+        return [{"owner": "o", "repo": "r", "description": "Specs", "isPrivate": False,
+                 "pushedAt": "2026-10-08T09:00:00Z", "openPrs": 2}]
+
+    async def open_pulls(self, owner, repo):
+        return [{"owner": owner, "repo": repo, "number": 8, "title": "Next spec", "author": "ann",
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": f"https://github.com/{owner}/{repo}/pull/8"}]
+
     async def review_requests(self):
         return [{"owner": "o", "repo": "r", "number": 8, "title": "Next spec", "author": "ann",
                  "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]

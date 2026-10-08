@@ -198,6 +198,16 @@ async def review_requests(request: Request):
     return await (await gh(request)).review_requests()
 
 
+@app.get("/api/repos")
+async def repos(request: Request, q: str = ""):
+    return await (await gh(request)).repos(q)
+
+
+@app.get("/api/repos/{owner}/{repo}/pulls")
+async def open_pulls(request: Request, owner: str, repo: str):
+    return await (await gh(request)).open_pulls(owner, repo)
+
+
 @app.get("/api/pr/{owner}/{repo}/{number}/page")
 async def page_data(request: Request, owner: str, repo: str, number: int):
     page = await pages.build_page(await gh(request), PRRef(owner, repo, number))
