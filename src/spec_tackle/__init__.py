@@ -22,6 +22,13 @@ def main() -> None:
     if not find_token():
         print("spec-tackle: not signed in to GitHub. You can sign in from the page.")
 
+    from .claude import find_cli, sdk_installed
+
+    if not find_cli():
+        print("spec-tackle: Claude Code not found; Ask Claude is off.")
+    elif not sdk_installed():
+        print("spec-tackle: install spec-tackle[claude] to turn on Ask Claude.")
+
     url = f"http://{args.host}:{args.port}/"
     if args.pr:
         try:
@@ -29,7 +36,17 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"spec-tackle: {exc}\n")
 
+    from .app import allowed_hosts
+
+    allowed_hosts.add(args.host.lower())
+
     print(f"spec-tackle → {url}")
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
-    uvicorn.run("spec_tackle.app:app", host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(
+        "spec_tackle.app:app",
+        host=args.host,
+        port=args.port,
+        log_level="warning",
+        timeout_graceful_shutdown=3,  # open answer streams would otherwise block Ctrl+C
+    )

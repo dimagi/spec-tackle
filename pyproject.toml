@@ -20,11 +20,17 @@ dependencies = [
 [project.scripts]
 spec-tackle = "spec_tackle:main"
 
+[project.optional-dependencies]
+claude = [
+    "claude-agent-sdk>=0.2.164",
+]
+
 [build-system]
 requires = ["uv_build>=0.12.21,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "claude-agent-sdk>=0.2.164",
     "pytest>=9.1.1",
 ]

@@ -48,6 +48,10 @@ class Session:
             return None
         return self._viewer
 
+    async def token(self) -> str:
+        """The signed-in token, for tools (like git) that need it directly."""
+        return (await self.client()).token
+
     async def use_token(self, token: str) -> dict:
         await self._connect(token)
         self._pasted_token = token

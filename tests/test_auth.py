@@ -74,3 +74,34 @@ def test_api_says_signed_out(signed_out):
 
 def test_next_only_returns_to_this_app(signed_out):
     assert "evil.example" not in signed_out.get("/?next=//evil.example/x").text
+
+
+def test_session_token_returns_the_signed_in_token(monkeypatch):
+    async def fake_viewer(self):
+        return {"login": "me", "name": None, "avatarUrl": ""}
+
+    monkeypatch.setattr(auth, "find_token", lambda: "tok-123")
+    monkeypatch.setattr(auth.GitHub, "viewer", fake_viewer)
+    session = auth.Session()
+    assert asyncio.run(session.token()) == "tok-123"
+
+
+def test_session_token_raises_when_signed_out(monkeypatch):
+    monkeypatch.setattr(auth, "find_token", lambda: None)
+    with pytest.raises(auth.NotSignedIn):
+        asyncio.run(auth.Session().token())
+
+
+@pytest.mark.parametrize(
+    "host, status",
+    [
+        ("localhost:8765", 401),
+        ("127.0.0.1:8765", 401),
+        ("[::1]:8765", 401),
+        ("192.168.1.5:8765", 401),
+        ("evil.example:8765", 421),  # a DNS-rebound page
+        ("localhost.evil.example", 421),
+    ],
+)
+def test_only_known_hosts_reach_the_app(signed_out, host, status):
+    assert signed_out.get("/api/pr/o/r/1/activity", headers={"host": host}).status_code == status
