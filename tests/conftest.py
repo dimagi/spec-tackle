@@ -55,6 +55,9 @@ class FakeGitHub:
     async def raw_file(self, owner, repo, path, ref):
         return b"# Title\n\ntwo\nthree\n"
 
+    async def pr_refs(self, pr):
+        return {"headRefOid": "abc1234", "baseRefOid": "bae5567"}
+
 
 class FakeSession:
     def __init__(self, login="me"):

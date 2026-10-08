@@ -14,11 +14,11 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import claude, claude_api, pages, render
+from . import claude, claude_api, maps, pages, render
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
 from .github import GitHub, GitHubError, PRRef, parse_pr_url
-from .store import Store, StoreError
+from .store import Store, StoreError, data_dir
 from .turns import TurnRunner
 
 HERE = Path(__file__).parent
@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
     cli = claude.find_cli()
     app.state.claude_cli = cli if cli and claude.sdk_installed() and app.state.store else None
     app.state.checkouts = Checkouts()
+    app.state.maps = maps.MapJobs(data_dir() / "maps", app.state.checkouts)
     app.state.turns = TurnRunner()
     yield
     await app.state.turns.aclose()
@@ -202,6 +203,24 @@ async def page_data(request: Request, owner: str, repo: str, number: int):
         "viewer": await session(request).viewer(),
         "claude": bool(request.app.state.claude_cli),
     }
+
+
+@app.get("/api/pr/{owner}/{repo}/{number}/map")
+async def pr_map(request: Request, owner: str, repo: str, number: int):
+    pr = PRRef(owner, repo, number)
+    client = await gh(request)
+    jobs: maps.MapJobs = request.app.state.maps
+    refs = await client.pr_refs(pr)
+    shas = {"owner": owner, "repo": repo, "base": refs["baseRefOid"], "head": refs["headRefOid"]}
+    try:
+        files = [] if jobs.cached(**shas) or jobs.running(**shas) else [
+            {k: f.get(k) for k in ("status", "additions", "deletions", "patch")} | {"path": f["filename"]}
+            for f in await client.files(pr)
+        ]
+        result = await jobs.get(**shas, files=files, token=client.token)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {**result, "headSha": refs["headRefOid"]}
 
 
 @app.post("/api/pr/{owner}/{repo}/{number}/comments")

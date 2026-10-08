@@ -170,6 +170,18 @@ class GitHub:
             raise GitHubError("Pull request not found", 404)
         return {"viewer": data["viewer"], **pull}
 
+    async def pr_refs(self, pr: PRRef) -> dict:
+        """The PR's current head and base commits."""
+        data = await self._graphql(
+            "query($owner: String!, $repo: String!, $number: Int!) {"
+            " repository(owner: $owner, name: $repo) { pullRequest(number: $number) { headRefOid baseRefOid } } }",
+            owner=pr.owner, repo=pr.repo, number=pr.number,
+        )
+        pull = data["repository"]["pullRequest"]
+        if pull is None:
+            raise GitHubError("Pull request not found", 404)
+        return pull
+
     async def activity(self, pr: PRRef) -> dict:
         data = await self._graphql(
             _ACTIVITY_QUERY, owner=pr.owner, repo=pr.repo, number=pr.number
