@@ -406,7 +406,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       />
       {logicVisited && (
         <div hidden={tab !== "logic"}>
-          <LogicView pr={pr} head={renderedSha} onShowInReview={showInReview} />
+          <LogicView pr={pr} head={activity.headSha} onShowInReview={showInReview} />
         </div>
       )}
       <div className="flex" hidden={tab !== "review"}>

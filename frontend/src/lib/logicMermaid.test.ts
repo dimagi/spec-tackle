@@ -84,3 +84,9 @@ test("allParentIds lists every block that has children", () => {
   const nested = [block("a", { children: [block("b", { children: [block("c")] })] }), block("d")];
   expect(allParentIds(nested)).toEqual(["a", "b"]);
 });
+
+test("long subgraph titles are shortened so Mermaid doesn't clip them", () => {
+  const long = "can_act_as_program_manager_user(user, org) checks every membership";
+  const { source } = toMermaid([block("p", { label: long, children: [block("q")] })], new Set(["p"]));
+  expect(lines(source)).toContain('subgraph c0["⊖ can_act_as_program_manager_user(user, org)…"]');
+});

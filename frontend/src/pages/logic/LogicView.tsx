@@ -17,7 +17,10 @@ type Props = {
 type Run = { head: string; progress: string };
 
 /** The Logic tab: generate a map of the PR's behaviour, then explore it. */
-export function LogicView({ pr, head, onShowInReview }: Props) {
+export function LogicView({ pr, head: pageHead, onShowInReview }: Props) {
+  // A run is for the PR's real head, which can be newer than the page's; follow that one.
+  const [head, setHead] = useState(pageHead);
+  useEffect(() => setHead(pageHead), [pageHead]);
   const logic = useLogic(pr, head);
   const queryClient = useQueryClient();
   const [run, setRun] = useState<Run | null>(null);
@@ -58,7 +61,9 @@ export function LogicView({ pr, head, onShowInReview }: Props) {
     setPosting(true);
     try {
       const started = await request<LogicState>("POST", `${api}/logic`);
-      setRun({ head: started.head ?? head, progress: "Starting…" });
+      const runHead = started.head ?? head;
+      setHead(runHead);
+      setRun({ head: runHead, progress: "Starting…" });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -72,6 +77,8 @@ export function LogicView({ pr, head, onShowInReview }: Props) {
   }
   const { available, map, stale } = logic.data;
   if (!available) return null;
+  // A run that failed while this tab wasn't watching is reported by the server.
+  const failure = run ? null : error ?? logic.data.error ?? null;
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
@@ -84,9 +91,9 @@ export function LogicView({ pr, head, onShowInReview }: Props) {
           <p className="mt-1 text-xs text-stone-500">Claude is mapping this PR. You can leave this tab; it keeps going.</p>
         </Card>
       )}
-      {error && !run && (
+      {failure && (
         <Card tone="error">
-          <p>{error}</p>
+          <p>{failure}</p>
           <button type="button" className="mt-2 font-semibold underline" onClick={generate} disabled={posting}>Try again</button>
         </Card>
       )}
@@ -98,7 +105,7 @@ export function LogicView({ pr, head, onShowInReview }: Props) {
       )}
       {map ? (
         <MapView key={map.id} pr={pr} map={map} onShowInReview={onShowInReview} />
-      ) : !run && !error && (
+      ) : !run && !failure && (
         <div className="mx-auto max-w-xl py-16 text-center">
           <h2 className="font-serif text-2xl font-semibold">See what this PR does</h2>
           <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">

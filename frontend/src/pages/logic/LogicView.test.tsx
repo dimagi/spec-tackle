@@ -233,3 +233,24 @@ test("if Mermaid fails, the map is shown as a list that still works", async () =
   await userEvent.click(await within(list).findByRole("button", { name: /Store the visit/ }));
   expect(await screen.findByRole("complementary", { name: "Store the visit" })).toBeInTheDocument();
 });
+
+test("a run that failed while nobody watched shows its error", async () => {
+  routes[`GET ${LOGIC}?head=${HEAD}`] = state({ error: "Couldn't fetch the repository: gone" });
+  setup();
+  expect(await screen.findByText("Couldn't fetch the repository: gone")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+});
+
+test("a run started for a newer head is followed at that head, so the new map isn't called stale", async () => {
+  const NEW = "def5678bbbb";
+  routes[`GET ${LOGIC}?head=${HEAD}`] = state();
+  routes[`POST ${LOGIC}`] = state({ running: true, head: NEW });
+  routes[`GET ${LOGIC}?head=${NEW}`] = state({ map: { ...MAP, headSha: NEW } });
+  setup();
+  await userEvent.click(await screen.findByRole("button", { name: "Generate logic map" }));
+  const source = await opened();
+  expect(source.url).toBe(`${LOGIC}/events?head=${NEW}`);
+  source.send({ type: "done", mapId: "m1" });
+  expect(await screen.findByText("Retries failed submissions.")).toBeInTheDocument();
+  expect(screen.queryByText(/Generated for/)).toBeNull();
+});

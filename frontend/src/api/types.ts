@@ -125,7 +125,7 @@ export type LogicBlock = {
 export type LogicMap = { id: string; headSha: string; summary: string; blocks: LogicBlock[]; createdAt: string };
 
 /** GET/POST …/logic. `head` comes back from POST: the commit the run is for. */
-export type LogicState = { available: boolean; map: LogicMap | null; stale: boolean; running: boolean; head?: string };
+export type LogicState = { available: boolean; map: LogicMap | null; stale: boolean; running: boolean; error?: string | null; head?: string };
 
 export type LogicFunction = FunctionRef & {
   lines: { n: number; html: string; changed: boolean }[];

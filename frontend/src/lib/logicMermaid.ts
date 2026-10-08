@@ -30,6 +30,16 @@ export function escapeLabel(text: string): string {
     .replace(/\s*\n\s*/g, " ");
 }
 
+const TITLE_MAX = 44;
+
+/** Mermaid clips long subgraph titles, so shorten them at a word boundary. */
+function title(label: string): string {
+  if (label.length <= TITLE_MAX) return label;
+  const cut = label.slice(0, TITLE_MAX);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > TITLE_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
 export type MermaidChart = { source: string; nodes: Map<string, LogicBlock>; clusters: Map<string, LogicBlock> };
 
 export function toMermaid(blocks: LogicBlock[], expanded: Set<string>): MermaidChart {
@@ -52,7 +62,7 @@ export function toMermaid(blocks: LogicBlock[], expanded: Set<string>): MermaidC
       ids.set(b.id, id);
       if (open) {
         clusters.set(id, b);
-        body.push(`${indent}subgraph ${id}["⊖ ${escapeLabel(b.label)}"]`, `${indent}  direction TB`);
+        body.push(`${indent}subgraph ${id}["⊖ ${escapeLabel(title(b.label))}"]`, `${indent}  direction TB`);
         level(b.children!, indent + "  ");
         body.push(`${indent}end`);
       } else {
