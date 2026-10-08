@@ -5,14 +5,17 @@ import { ApiError, onSignedOut } from "../../api/request";
 import type { Page } from "../../api/types";
 import { Toaster } from "../../components/Toaster";
 import { applyActivity, initialSeen, type SeenState } from "../../lib/activity";
-import { headingCounts, isBotThread } from "../../lib/threads";
+import { headingCounts, isBotThread, isShown, stepThread } from "../../lib/threads";
 import { createReviewStore, ReviewStoreContext, useReview } from "../../state/review";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 import { toast } from "../../state/toasts";
 import { ReviewPageCtx, type ReviewPageContext } from "./context";
 import { Description } from "./Description";
 import { FileSection } from "./FileSection";
+import { useKeyboard } from "./hooks/useKeyboard";
+import type { MarginEngine } from "./hooks/useMarginEngine";
 import { useMermaid } from "./hooks/useMermaid";
+import { Margin } from "./Margin";
 import { Rail } from "./Rail";
 import { TopBar } from "./TopBar";
 
@@ -58,12 +61,16 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     return s;
   });
   const seenRef = useRef(seenState);
+  // Bumped when a file switches Document/Changes, so margin anchors are recomputed.
+  const [, setViewVersion] = useState(0);
   const [signedOut, setSignedOut] = useState(false);
   const unreadWhileHidden = useRef(0);
   const filter = useReview((s) => s.filter);
   const hideBots = useReview((s) => s.hideBots);
   const activate = useReview((s) => s.activate);
   const docRef = useRef<HTMLElement>(null);
+  const engineRef = useRef<MarginEngine | null>(null);
+  const active = useReview((s) => s.active);
   useMermaid(docRef);
 
   useEffect(() => {
@@ -128,6 +135,42 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   const counts = headingCounts(page.files, activity.threads, filters);
   const conversationCount = activity.conversation.filter((c) => !(hideBots && c.author.isBot)).length;
 
+  const step = (direction: 1 | -1) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const list = activity.threads
+      .filter((t) => isShown(t, filters) && !t.isResolved)
+      .map((t) => ({ id: t.id, top: engine.anchorTop(t.id) }))
+      .filter((t): t is { id: string; top: number } => t.top !== null)
+      .sort((a, b) => a.top - b.top);
+    const next = stepThread(list, active, direction, scrollY + innerHeight * 0.3);
+    if (next) activate(next, { scroll: true });
+    else toast("No open threads 🎉");
+  };
+
+  useKeyboard({
+    step,
+    escape: () => activate(null),
+    reply: () => {
+      if (!active) return;
+      document.querySelector<HTMLTextAreaElement>(`[data-card="${CSS.escape(active)}"] .thread-reply textarea`)?.focus();
+    },
+  });
+
+  // Clicking a highlighted passage activates its thread (cycling if several share it).
+  const onDocClick = (e: React.MouseEvent) => {
+    const target = e.target as Element;
+    if (target.closest("a, button, summary, input, textarea")) return;
+    if (!getSelection()?.isCollapsed) return;
+    const anchor = target.closest(".has-thread, .has-claude");
+    const list = anchor ? engineRef.current?.threadsAt(anchor) ?? [] : [];
+    if (list.length) {
+      activate(list[(list.indexOf(active ?? "") + 1) % list.length]);
+      return;
+    }
+    if (active && active !== "composer") activate(null);
+  };
+
   const ctx: ReviewPageContext = {
     page, pr, api: apiBase(pr), activity, fresh: seenState.fresh,
     markSeen: (id) => {
@@ -148,16 +191,16 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       />
       <div className="flex">
         <Rail files={page.files} claude={page.claude} stats={stats} headingCounts={counts}
-          conversationCount={conversationCount} onStep={() => {}} />
+          conversationCount={conversationCount} onStep={step} />
         <div className="min-w-0 flex-1 px-4 py-8 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] gap-6">
-            <main id="doc" ref={docRef} className="relative min-w-0 flex-1">
+            <main id="doc" ref={docRef} className="relative min-w-0 flex-1" onClick={onDocClick}>
               <Description overview={page.overview} />
               {page.files.map((file, i) => (
-                <FileSection key={file.path} file={file} index={i + 1} />
+                <FileSection key={file.path} file={file} index={i + 1} onViewChange={() => setViewVersion((v) => v + 1)} />
               ))}
             </main>
-            <div id="margin" className="relative hidden w-[340px] shrink-0 md:block xl:w-[380px]" />
+            <Margin docRef={docRef} engineRef={engineRef} onResolve={() => {}} renderReply={() => null} />
           </div>
         </div>
       </div>

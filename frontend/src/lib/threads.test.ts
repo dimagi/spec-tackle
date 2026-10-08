@@ -1,5 +1,5 @@
 import type { PageFile, Thread } from "../api/types";
-import { commentableRange, headingCounts, isCollapsible, isShown, quoteFor, rangeLabel, threadRange } from "./threads";
+import { commentableRange, headingCounts, isCollapsible, isShown, quoteFor, rangeLabel, stepThread, threadRange } from "./threads";
 
 const person = (isBot = false) => ({ login: isBot ? "ci[bot]" : "ann", avatarUrl: "", isBot });
 const thread = (over: Partial<Thread> = {}): Thread => ({
@@ -73,4 +73,24 @@ test("headingCounts counts open, shown threads under each heading until the next
 
   expect(counts.get("a.md#a")).toBe(1);
   expect(counts.get("a.md#b")).toBe(1);
+});
+
+describe("stepThread", () => {
+  const list = [{ id: "a", top: 100 }, { id: "b", top: 500 }, { id: "c", top: 900 }];
+
+  test("moves from the active thread and wraps around", () => {
+    expect(stepThread(list, "a", 1, 0)).toBe("b");
+    expect(stepThread(list, "c", 1, 0)).toBe("a");
+    expect(stepThread(list, "a", -1, 0)).toBe("c");
+  });
+
+  test("without an active thread it starts from what's on screen", () => {
+    expect(stepThread(list, null, 1, 300)).toBe("b");
+    expect(stepThread(list, null, -1, 600)).toBe("b");
+    expect(stepThread(list, null, 1, 2000)).toBe("a");
+  });
+
+  test("no open threads gives nothing", () => {
+    expect(stepThread([], null, 1, 0)).toBeNull();
+  });
 });

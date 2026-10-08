@@ -50,3 +50,21 @@ export function headingCounts(files: PageFile[], threads: Thread[], filters: Thr
   }
   return counts;
 }
+
+/** j/k: the next or previous open thread, starting from what's on screen when none is active. */
+export function stepThread(
+  list: { id: string; top: number }[],
+  activeId: string | null,
+  direction: 1 | -1,
+  viewportY: number,
+): string | null {
+  if (!list.length) return null;
+  let index = list.findIndex((t) => t.id === activeId);
+  if (index < 0) {
+    index = direction > 0 ? list.findIndex((t) => t.top > viewportY) : list.findLastIndex((t) => t.top < viewportY);
+    if (index < 0) index = direction > 0 ? 0 : list.length - 1;
+  } else {
+    index = (index + direction + list.length) % list.length;
+  }
+  return list[index].id;
+}
