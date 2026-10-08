@@ -4,10 +4,13 @@ import { IndexPage } from "./pages/index/IndexPage";
 import { ReviewPage } from "./pages/review/ReviewPage";
 
 /** Each PR gets a fresh review page: its store, seen-state and polling are per PR. */
-function ReviewRoute() {
+export function ReviewRoute() {
   const { owner, repo, number } = useParams();
   const key = `${owner}/${repo}/${number}`;
-  useLayoutEffect(() => window.scrollTo(0, 0), [key]);
+  // Braces matter: newer Chrome's scrollTo returns a promise, which React would take for a cleanup.
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [key]);
   return <ReviewPage key={key} />;
 }
 
