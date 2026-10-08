@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router";
+import { Navigate, useBlocker, useNavigate, useParams } from "react-router";
 import { activityKey, apiBase, claudeKey, useClaudeThreads, useLiveActivity, usePage } from "../../api/queries";
 import { ApiError, onSignedOut, request } from "../../api/request";
 import type { ClaudeThread, Comment, Page, Thread } from "../../api/types";
@@ -168,6 +168,17 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   /** True unless the composer holds unsent text the reviewer wants to keep. */
   const confirmDiscard = () =>
     !(store.getState().composer && composerDirty.current) || confirm("Discard your unsent text?");
+
+  // Back/Forward to another page would drop unsent composer text, so ask first.
+  // (The PR switcher asks through confirmDiscard before it navigates.)
+  const blocker = useBlocker(({ currentLocation, nextLocation, historyAction }) =>
+    historyAction === "POP" && currentLocation.pathname !== nextLocation.pathname
+    && !!store.getState().composer && composerDirty.current);
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    if (confirm("Discard your unsent text?")) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
 
   const openComposer = (target: ComposerTarget) => {
     if (!confirmDiscard()) return;

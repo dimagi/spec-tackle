@@ -54,9 +54,11 @@ class FakeGitHub:
         self.reviews: list[dict] = []
         self.posted: list[dict] = []
 
-    def _activity(self) -> dict:
+    def _activity(self, pr) -> dict:
+        # Only PR 7 has comments, so a second PR shows whether state leaks between them.
+        threads = self.threads if pr.number == 7 else []
         return {"headRefOid": self.head, "state": "OPEN", "isDraft": False, "merged": False, "viewer": {"login": "me", "avatarUrl": ""},
-                "reviewThreads": {"nodes": self.threads}, "comments": {"nodes": self.conversation},
+                "reviewThreads": {"nodes": threads}, "comments": {"nodes": self.conversation},
                 "reviews": {"nodes": self.reviews}}
 
     async def overview(self, pr):
@@ -64,10 +66,10 @@ class FakeGitHub:
                 "url": f"https://github.com/o/r/pull/{pr.number}",
                 "body": "Adds retries.", "bodyHTML": "<p>Adds retries.</p>", "author": ANN, "createdAt": "2026-10-08T08:00:00Z",
                 "updatedAt": "", "baseRefName": "main", "headRefName": "retry", "additions": 9, "deletions": 0,
-                "changedFiles": 1, "reviewDecision": None, **self._activity()}
+                "changedFiles": 1, "reviewDecision": None, **self._activity(pr)}
 
     async def activity(self, pr):
-        return self._activity()
+        return self._activity(pr)
 
     async def files(self, pr):
         patch = "@@ -0,0 +1,9 @@\n" + "\n".join(f"+{line}" for line in DOC.rstrip("\n").split("\n"))
