@@ -13,6 +13,8 @@ import { toast } from "../../state/toasts";
 import { setResolved } from "./actions";
 import { Composer } from "./Composer";
 import { ReviewPageCtx, type ReviewPageContext } from "./context";
+import { Conversation } from "./Conversation";
+import { FinishReview, type ReviewEvent } from "./FinishReview";
 import { Description } from "./Description";
 import { FileSection } from "./FileSection";
 import { useKeyboard } from "./hooks/useKeyboard";
@@ -212,6 +214,31 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     }
   };
 
+  const [reviewOpen, setReviewOpen] = useState(false);
+
+  const postConversation = async (body: string) => {
+    try {
+      const created = await request<Comment>("POST", `${api}/conversation`, { body });
+      markSeen(created.id);
+      await live.refresh();
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
+  const submitReview = async (event: ReviewEvent, body: string) => {
+    try {
+      const created = await request<Comment>("POST", `${api}/review`, { event, body });
+      markSeen(created.id);
+      toast(event === "APPROVE" ? "Approved ✓" : "Review submitted");
+      await live.refresh();
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
   const step = (direction: 1 | -1) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -273,7 +300,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         sync={{ fetching: live.fetching, error: live.error, lastSync: live.lastSync, signedOut }}
         newCommits={activity.headSha !== renderedSha}
         onRefresh={() => live.refresh()}
-        onFinishReview={() => {}}
+        onFinishReview={() => setReviewOpen(true)}
       />
       <div className="flex">
         <Rail files={page.files} claude={page.claude} stats={stats} headingCounts={counts}
@@ -289,6 +316,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
               {page.files.map((file, i) => (
                 <FileSection key={file.path} file={file} index={i + 1} onViewChange={() => setViewVersion((v) => v + 1)} />
               ))}
+              <Conversation items={activity.conversation} fresh={seenState.fresh} hideBots={hideBots} onPost={postConversation} />
             </main>
             <Margin
               docRef={docRef} engineRef={engineRef} onResolve={resolve}
@@ -311,6 +339,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
           </div>
         </div>
       </div>
+      <FinishReview open={reviewOpen} onClose={() => setReviewOpen(false)} onSubmit={submitReview} />
       <SelectionButton selection={selection} claude={page.claude} onComment={() => commentOnSelection("comment")} />
     </ReviewPageCtx.Provider>
   );
