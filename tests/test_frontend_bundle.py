@@ -11,7 +11,11 @@ INPUTS = ["index.html", "package-lock.json", "vite.config.ts", "tsconfig.json"]
 
 
 def source_hash() -> str:
-    files = sorted(p for p in (FRONTEND / "src").rglob("*") if p.is_file())
+    # Sorted by the "/"-joined relative path, like the build script (not by path parts).
+    files = sorted(
+        (p for p in (FRONTEND / "src").rglob("*") if p.is_file()),
+        key=lambda p: p.relative_to(FRONTEND).as_posix(),
+    )
     files += [FRONTEND / name for name in INPUTS]
     digest = hashlib.sha256()
     for path in files:
