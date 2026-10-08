@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import uuid
@@ -35,6 +36,16 @@ _MIGRATIONS = [
         role TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX claude_threads_by_pr ON claude_threads (login, owner, repo, number);
+    """,
+    # 3: Logic view maps (see docs/specs/2026-10-08-logic-view-design.md)
+    """
+    CREATE TABLE logic_maps (
+        id TEXT PRIMARY KEY, login TEXT NOT NULL,
+        owner TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL,
+        head_sha TEXT NOT NULL, summary TEXT NOT NULL, tree TEXT NOT NULL,
+        changed_lines TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE (login, owner, repo, number, head_sha)
+    );
     """,
 ]
 
@@ -158,4 +169,48 @@ class Store:
                 {"role": m["role"], "body": m["body"], "createdAt": m["created_at"]}
                 for m in messages
             ],
+        }
+
+    # -- Logic maps ---------------------------------------------------------
+
+    def save_logic_map(
+        self, *, login: str, pr: PRRef, head_sha: str, summary: str, blocks: list,
+        changed_lines: dict[str, list[int]],
+    ) -> str:
+        """Store a map; one for the same login, PR and commit is replaced."""
+        map_id = str(uuid.uuid4())
+        self._db.execute(
+            "INSERT OR REPLACE INTO logic_maps (id, login, owner, repo, number, head_sha, summary,"
+            " tree, changed_lines, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (map_id, login, pr.owner, pr.repo, pr.number, head_sha, summary,
+             json.dumps(blocks), json.dumps(changed_lines), _now()),
+        )
+        return map_id
+
+    def latest_logic_map(self, *, login: str, pr: PRRef) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM logic_maps WHERE login = ? AND owner = ? AND repo = ? AND number = ?"
+            " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (login, pr.owner, pr.repo, pr.number),
+        ).fetchone()
+        return self._logic_map(row) if row else None
+
+    def logic_map(self, *, login: str, map_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM logic_maps WHERE id = ? AND login = ?", (map_id, login)
+        ).fetchone()
+        return self._logic_map(row) if row else None
+
+    @staticmethod
+    def _logic_map(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "owner": row["owner"],
+            "repo": row["repo"],
+            "number": row["number"],
+            "headSha": row["head_sha"],
+            "summary": row["summary"],
+            "blocks": json.loads(row["tree"]),
+            "changedLines": json.loads(row["changed_lines"]),
+            "createdAt": row["created_at"],
         }

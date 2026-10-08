@@ -81,7 +81,10 @@ def test_migrates_an_old_database(tmp_path):
     s = Store.open(path)
     assert s.threads_for_pr(login="me", pr=PR) == []
     s.close()
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (2,)
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (3,)
+    s = Store.open(path)
+    assert s.latest_logic_map(login="me", pr=PR) is None
+    s.close()
 
 
 def test_unopenable_path_raises_store_error(tmp_path):
@@ -89,3 +92,44 @@ def test_unopenable_path_raises_store_error(tmp_path):
     blocker.write_text("not a directory")
     with pytest.raises(StoreError):
         Store.open(blocker / "state.db")
+
+
+BLOCKS = [{"id": "a", "label": "Start", "kind": "entry", "change": "added", "next": []}]
+
+
+def _save_map(store, sha="abc123", login="me", summary="Does a thing."):
+    return store.save_logic_map(login=login, pr=PR, head_sha=sha, summary=summary, blocks=BLOCKS,
+                                changed_lines={"app/x.py": [3, 4]})
+
+
+def test_logic_map_round_trip(store):
+    map_id = _save_map(store)
+    saved = store.logic_map(login="me", map_id=map_id)
+    assert saved["id"] == map_id and saved["headSha"] == "abc123"
+    assert saved["summary"] == "Does a thing." and saved["blocks"] == BLOCKS
+    assert saved["changedLines"] == {"app/x.py": [3, 4]}
+    assert (saved["owner"], saved["repo"], saved["number"]) == ("o", "r", 7)
+    assert store.latest_logic_map(login="me", pr=PR)["id"] == map_id
+
+
+def test_regenerating_for_the_same_commit_replaces_the_map(store):
+    _save_map(store, summary="First.")
+    _save_map(store, summary="Second.")
+    assert store.latest_logic_map(login="me", pr=PR)["summary"] == "Second."
+    assert store._db.execute("SELECT COUNT(*) FROM logic_maps").fetchone()[0] == 1
+
+
+def test_latest_logic_map_is_the_newest_commit(store, monkeypatch):
+    from spec_tackle import store as store_module
+
+    monkeypatch.setattr(store_module, "_now", lambda: "2026-10-08T09:00:00+00:00")
+    _save_map(store, sha="old")
+    monkeypatch.setattr(store_module, "_now", lambda: "2026-10-08T10:00:00+00:00")
+    _save_map(store, sha="new")
+    assert store.latest_logic_map(login="me", pr=PR)["headSha"] == "new"
+
+
+def test_logic_maps_are_private_to_their_login(store):
+    map_id = _save_map(store)
+    assert store.logic_map(login="someone", map_id=map_id) is None
+    assert store.latest_logic_map(login="someone", pr=PR) is None
