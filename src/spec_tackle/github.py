@@ -105,6 +105,21 @@ query($owner: String!, $repo: String!, $number: Int!) {{
 """
 
 
+_REVIEW_REQUESTS_QUERY = """
+query {
+  search(query: "is:open is:pr review-requested:@me sort:updated-desc", type: ISSUE, first: 20) {
+    nodes {
+      ... on PullRequest {
+        number title isDraft updatedAt url
+        repository { name owner { login } }
+        author { login }
+      }
+    }
+  }
+}
+"""
+
+
 class GitHub:
     def __init__(self, token: str):
         self.token = token
@@ -180,6 +195,25 @@ class GitHub:
         return await self._paginate(
             f"/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/files"
         )
+
+    async def review_requests(self) -> list[dict]:
+        """Open PRs waiting on the viewer's review, most recently updated first."""
+        data = await self._graphql(_REVIEW_REQUESTS_QUERY)
+        pulls = [
+            {
+                "owner": node["repository"]["owner"]["login"],
+                "repo": node["repository"]["name"],
+                "number": node["number"],
+                "title": node["title"],
+                "author": (node["author"] or {}).get("login"),
+                "updatedAt": node["updatedAt"],
+                "isDraft": node["isDraft"],
+                "url": node["url"],
+            }
+            for node in data["search"]["nodes"]
+            if node  # non-PR hits are empty objects
+        ]
+        return sorted(pulls, key=lambda p: p["updatedAt"], reverse=True)
 
     async def raw_file(self, owner: str, repo: str, path: str, ref: str) -> bytes:
         response = await self._request(

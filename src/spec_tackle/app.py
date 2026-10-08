@@ -193,6 +193,11 @@ async def session_info(request: Request):
     }
 
 
+@app.get("/api/review-requests")
+async def review_requests(request: Request):
+    return await (await gh(request)).review_requests()
+
+
 @app.get("/api/pr/{owner}/{repo}/{number}/page")
 async def page_data(request: Request, owner: str, repo: str, number: int):
     page = await pages.build_page(await gh(request), PRRef(owner, repo, number))
