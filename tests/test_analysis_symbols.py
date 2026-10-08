@@ -156,3 +156,8 @@ def test_form_feeds_dont_shift_line_numbers():
     patch = "@@ -1,7 +1,7 @@\n import os\n \x0c\n \n-def f(a):\n+def f(a, b):\n     return a\n \n "
     assert base_text(head, patch, "modified") == base
     assert changed_lines(patch) == ({4}, {4})
+def test_symbols_know_where_they_were_in_the_base():
+    s = symbols()
+    assert s["edit"].base_lines == (8, 9)
+    assert s["gone"].base_lines == (12, 13)
+    assert s["fresh"].base_lines is None

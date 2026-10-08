@@ -18,6 +18,7 @@ class Symbol:
     change: Change
     signature_changed: bool
     lines: tuple[int, int]
+    base_lines: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +105,7 @@ def changed_symbols(base_src: str | None, head_src: str | None, added: set[int],
             change = "removed"
         span = h or b
         resigned = bool(h and b and h.signature is not None and h.signature != b.signature)
-        symbols.append(Symbol(name, span.kind, change, resigned, (span.start, span.end)))
+        symbols.append(Symbol(name, span.kind, change, resigned, (span.start, span.end), (b.start, b.end) if b else None))
     if head_module or base_module:
         symbols.insert(0, Symbol(MODULE, "module", "modified", False, (1, 1)))
     return symbols
