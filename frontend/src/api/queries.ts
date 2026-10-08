@@ -6,6 +6,8 @@ import type { Activity, ClaudeThread, Page, Session } from "./types";
 
 export const POLL_MS = 30_000;
 
+export const activityKey = (pr: PRRef) => ["activity", pr.owner, pr.repo, pr.number];
+
 export const apiBase = (pr: PRRef) => `/api/pr/${pr.owner}/${pr.repo}/${pr.number}`;
 
 export function useSession() {
@@ -23,7 +25,7 @@ export function usePage(pr: PRRef) {
 /** The PR's comments and state, polled every 30 seconds and when the tab comes back. */
 export function useLiveActivity(pr: PRRef, initial: Activity) {
   const queryClient = useQueryClient();
-  const key = ["activity", pr.owner, pr.repo, pr.number];
+  const key = activityKey(pr);
   const query = useQuery({
     queryKey: key,
     queryFn: () => request<Activity>("GET", `${apiBase(pr)}/activity`),

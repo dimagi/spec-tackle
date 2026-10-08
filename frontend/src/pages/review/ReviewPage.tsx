@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
-import { apiBase, useLiveActivity, usePage } from "../../api/queries";
-import { ApiError, onSignedOut } from "../../api/request";
-import type { Page } from "../../api/types";
+import { activityKey, apiBase, useLiveActivity, usePage } from "../../api/queries";
+import { ApiError, onSignedOut, request } from "../../api/request";
+import type { Comment, Page, Thread } from "../../api/types";
 import { Toaster } from "../../components/Toaster";
 import { applyActivity, initialSeen, type SeenState } from "../../lib/activity";
 import { headingCounts, isBotThread, isShown, stepThread } from "../../lib/threads";
-import { createReviewStore, ReviewStoreContext, useReview } from "../../state/review";
+import { createReviewStore, ReviewStoreContext, useReview, useReviewStore, type ComposerTarget } from "../../state/review";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 import { toast } from "../../state/toasts";
+import { setResolved } from "./actions";
+import { Composer } from "./Composer";
 import { ReviewPageCtx, type ReviewPageContext } from "./context";
 import { Description } from "./Description";
 import { FileSection } from "./FileSection";
@@ -16,7 +19,10 @@ import { useKeyboard } from "./hooks/useKeyboard";
 import type { MarginEngine } from "./hooks/useMarginEngine";
 import { useMermaid } from "./hooks/useMermaid";
 import { Margin } from "./Margin";
+import { GutterButton } from "./GutterButton";
 import { Rail } from "./Rail";
+import { ReplyBox } from "./ReplyBox";
+import { SelectionButton, useSelection } from "./SelectionButton";
 import { TopBar } from "./TopBar";
 
 export function ReviewPage() {
@@ -135,6 +141,77 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   const counts = headingCounts(page.files, activity.threads, filters);
   const conversationCount = activity.conversation.filter((c) => !(hideBots && c.author.isBot)).length;
 
+  const markSeen = (id: number) => {
+    seenRef.current = { seen: new Set(seenRef.current.seen).add(id), fresh: seenRef.current.fresh };
+    setSeenState(seenRef.current);
+  };
+  const store = useReviewStore();
+  const queryClient = useQueryClient();
+  const composer = useReview((s) => s.composer);
+  const composerDirty = useRef(false);
+  const onDirtyChange = useCallback((dirty: boolean) => { composerDirty.current = dirty; }, []);
+  const { selection, clear: clearSelection } = useSelection();
+  const api = apiBase(pr);
+  const fail = (err: unknown) => toast((err as Error).message, { kind: "error", timeout: 8000 });
+
+  const openComposer = (target: ComposerTarget) => {
+    if (store.getState().composer && composerDirty.current && !confirm("Discard your unsent text?")) return;
+    composerDirty.current = false;
+    clearSelection();
+    store.getState().openComposer(target);
+  };
+  const closeComposer = () => {
+    composerDirty.current = false;
+    store.getState().closeComposer();
+  };
+  const commentOnSelection = (mode: "comment" | "claude") => {
+    if (!selection || (mode === "claude" && !page.claude)) return false;
+    openComposer({ path: selection.path, start: selection.start, end: selection.end, quote: selection.quote, mode });
+    return true;
+  };
+
+  const postComment = async (body: string) => {
+    const c = store.getState().composer!;
+    try {
+      const created = await request<Comment>("POST", `${api}/comments`, { path: c.path, start: c.start, end: c.end, body, commit: renderedSha });
+      markSeen(created.id);
+      closeComposer();
+      toast("Comment posted to the PR");
+      const latest = await live.refresh();
+      const thread = latest.threads.find((t) => t.comments.some((x) => x.id === created.id));
+      if (thread) activate(thread.id);
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
+  // Ask Claude is wired up with the Claude threads.
+  const askClaude = async (_body: string): Promise<void> => {};
+
+  const postReply = async (thread: Thread, body: string) => {
+    try {
+      const created = await request<Comment>("POST", `${api}/replies`, { commentId: thread.comments[0].id, body });
+      markSeen(created.id);
+      await live.refresh();
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
+  const resolve = async (thread: Thread, resolved: boolean): Promise<void> => {
+    if (resolved && store.getState().active === thread.id) activate(null);
+    try {
+      await setResolved(queryClient, activityKey(pr), thread.id, resolved, (id, to) =>
+        request("POST", `/api/threads/${encodeURIComponent(id)}/resolve`, { resolved: to }));
+      toast(resolved ? "Thread resolved" : "Thread reopened", resolved ? { action: "Undo", onAction: () => resolve(thread, false) } : {});
+      live.refresh();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
   const step = (direction: 1 | -1) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -150,7 +227,11 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
 
   useKeyboard({
     step,
-    escape: () => activate(null),
+    escape: () => {
+      if (store.getState().composer && !composerDirty.current) closeComposer();
+      activate(null);
+    },
+    comment: commentOnSelection,
     reply: () => {
       if (!active) return;
       document.querySelector<HTMLTextAreaElement>(`[data-card="${CSS.escape(active)}"] .thread-reply textarea`)?.focus();
@@ -168,15 +249,20 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       activate(list[(list.indexOf(active ?? "") + 1) % list.length]);
       return;
     }
-    if (active && active !== "composer") activate(null);
+    const block = target.closest<HTMLElement>(".view [data-ls]");
+    if (block) {
+      const path = block.closest<HTMLElement>("section.file")!.dataset.path!;
+      const start = +block.dataset.ls!, end = +block.dataset.le!;
+      if (composer && composer.path === path && composer.start === start && composer.end === end) return;
+      openComposer({ path, start, end, quote: null, mode: "comment" });
+    } else if (active && active !== "composer") {
+      activate(null);
+    }
   };
 
   const ctx: ReviewPageContext = {
-    page, pr, api: apiBase(pr), activity, fresh: seenState.fresh,
-    markSeen: (id) => {
-      seenRef.current = { seen: new Set(seenRef.current.seen).add(id), fresh: seenRef.current.fresh };
-      setSeenState(seenRef.current);
-    },
+    page, pr, api, activity, fresh: seenState.fresh,
+    markSeen,
     refresh: live.refresh,
   };
 
@@ -195,15 +281,37 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         <div className="min-w-0 flex-1 px-4 py-8 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] gap-6">
             <main id="doc" ref={docRef} className="relative min-w-0 flex-1" onClick={onDocClick}>
+              <GutterButton docRef={docRef} onAdd={(block) => openComposer({
+                path: block.closest<HTMLElement>("section.file")!.dataset.path!,
+                start: +block.dataset.ls!, end: +block.dataset.le!, quote: null, mode: "comment",
+              })} />
               <Description overview={page.overview} />
               {page.files.map((file, i) => (
                 <FileSection key={file.path} file={file} index={i + 1} onViewChange={() => setViewVersion((v) => v + 1)} />
               ))}
             </main>
-            <Margin docRef={docRef} engineRef={engineRef} onResolve={() => {}} renderReply={() => null} />
+            <Margin
+              docRef={docRef} engineRef={engineRef} onResolve={resolve}
+              renderReply={(t) => (
+                <ReplyBox pr={pr} threadId={t.id} onSubmit={(body) => postReply(t, body)}
+                  onFocus={() => { if (store.getState().active !== t.id) activate(t.id); }} />
+              )}
+              composer={composer && (
+                <Composer
+                  key={`${composer.path}:${composer.start}:${composer.end}`}
+                  target={composer} file={page.files.find((f) => f.path === composer.path)!}
+                  claude={page.claude} api={api}
+                  onModeChange={(mode) => store.getState().setComposerMode(mode)}
+                  onCancel={closeComposer}
+                  onSubmit={(body, mode) => (mode === "claude" ? askClaude(body) : postComment(body))}
+                  onDirtyChange={onDirtyChange}
+                />
+              )}
+            />
           </div>
         </div>
       </div>
+      <SelectionButton selection={selection} claude={page.claude} onComment={() => commentOnSelection("comment")} />
     </ReviewPageCtx.Provider>
   );
 }

@@ -11,11 +11,13 @@ type Props = {
   engineRef: RefObject<MarginEngine | null>;
   onResolve: (thread: Thread, resolved: boolean) => void;
   renderReply: (thread: Thread) => ReactNode;
+  /** The composer card's content, when one is open. */
+  composer: ReactNode;
 };
 
 const isInteractive = (target: EventTarget) => !!(target as Element).closest("a, textarea, button");
 
-export function Margin({ docRef, engineRef, onResolve, renderReply }: Props) {
+export function Margin({ docRef, engineRef, onResolve, renderReply, composer }: Props) {
   const { activity, fresh } = useReviewPage();
   const s = useReview((st) => st);
   const marginRef = useRef<HTMLDivElement>(null);
@@ -24,6 +26,9 @@ export function Margin({ docRef, engineRef, onResolve, renderReply }: Props) {
   const items: MarginItem[] = activity.threads.map((t) => ({
     id: t.id, kind: "thread", path: t.path, range: threadRange(t), resolved: t.isResolved, hidden: !isShown(t, filters),
   }));
+  if (s.composer) {
+    items.push({ id: "composer", kind: "composer", path: s.composer.path, range: [s.composer.start, s.composer.end], hidden: false });
+  }
   const engine = useMarginEngine(docRef, marginRef, items, s.active, s.scrollSeq);
   engineRef.current = engine.current;
 
@@ -53,6 +58,15 @@ export function Margin({ docRef, engineRef, onResolve, renderReply }: Props) {
           </div>
         );
       })}
+      {s.composer && (
+        <div
+          data-card="composer"
+          className={`thread-card composer ${s.composer.mode === "claude" ? "is-claude" : ""}`}
+          onClick={(e) => { if (!isInteractive(e.target) && s.active !== "composer") s.activate("composer"); }}
+        >
+          {composer}
+        </div>
+      )}
     </div>
   );
 }
