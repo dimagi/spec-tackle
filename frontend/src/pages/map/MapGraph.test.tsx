@@ -35,3 +35,8 @@ test("the node under the reading-path cursor is highlighted", () => {
   const { container } = render(<FileNodeCard node={changed} maxSize={43} highlighted />);
   expect(container.firstChild).toHaveClass("is-hl");
 });
+
+test("one symbol is singular", () => {
+  render(<FileNodeCard node={{ ...changed, symbols: [changed.symbols![0]] }} maxSize={43} highlighted={false} />);
+  expect(screen.getByRole("button", { name: "▸ 1 symbol" })).toBeInTheDocument();
+});

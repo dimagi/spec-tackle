@@ -35,7 +35,7 @@ test("comment on a block from the gutter", async ({ page, request }) => {
   await expect(page.locator(".thread-card", { hasText: "Why five?" })).toBeVisible();
   await expect(page.getByText("Comment posted to the PR")).toBeVisible();
   const posted = await (await request.get("/e2e/posted")).json();
-  expect(posted.comments[0]).toMatchObject({ path: "docs/retry.md", body: "Why five?", line: 9, commit_id: "e2e0000headsha" });
+  expect(posted.comments[0]).toMatchObject({ path: "docs/retry.md", body: "Why five?", line: 9, commit_id: "e2e0000aaaa1" });
 });
 
 test("reply and resolve", async ({ page }) => {
@@ -76,7 +76,7 @@ test("after a force-push, comments still go to the commit the page shows", async
   await expect(page.getByText("Comment posted to the PR")).toBeVisible();
 
   const posted = await (await request.get("/e2e/posted")).json();
-  expect(posted.comments[0].commit_id).toBe("e2e0000headsha");
+  expect(posted.comments[0].commit_id).toBe("e2e0000aaaa1");
 });
 
 test("signing out mid-review warns once, however often it syncs", async ({ page, request }) => {

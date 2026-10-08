@@ -14,17 +14,20 @@ from pathlib import Path
 import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from repo_fixture import SHOP, added_patch, write_repo  # noqa: E402
 from spec_tackle import claude_api  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
 from spec_tackle.auth import NotSignedIn  # noqa: E402
 from spec_tackle.claude import Event  # noqa: E402
+from spec_tackle.maps import MapJobs  # noqa: E402
 from spec_tackle.store import Store  # noqa: E402
 from spec_tackle.turns import TurnRunner  # noqa: E402
 
 PORT = 8799
 DATA = Path(tempfile.mkdtemp(prefix="spec-tackle-e2e-"))
-HEAD = "e2e0000headsha"
+HEAD = "e2e0000aaaa1"
 DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff.\n\n## Limits\n\nAt most five tries.\n"
 ME = {"__typename": "User", "login": "me", "avatarUrl": ""}
 ANN = {"__typename": "User", "login": "ann", "avatarUrl": ""}
@@ -69,7 +72,14 @@ class FakeGitHub:
 
     async def files(self, pr):
         patch = "@@ -0,0 +1,9 @@\n" + "\n".join(f"+{line}" for line in DOC.rstrip("\n").split("\n"))
-        return [{"filename": "docs/retry.md", "status": "added", "additions": 9, "deletions": 0, "patch": patch}]
+        return [
+            {"filename": "docs/retry.md", "status": "added", "additions": 9, "deletions": 0, "patch": patch},
+            {"filename": "shop/sync.py", "status": "modified", "additions": 1, "deletions": 1, "patch": SYNC_PATCH},
+            {"filename": "shop/models.py", "status": "added", "additions": 3, "deletions": 0, "patch": added_patch(SHOP["shop/models.py"])},
+        ]
+
+    async def pr_refs(self, pr):
+        return {"headRefOid": self.head, "baseRefOid": "e2eba5e"}
 
     async def raw_file(self, owner, repo, path, ref):
         return DOC.encode()
@@ -141,7 +151,7 @@ async def posted():
 @app.post("/e2e/push")
 async def push():
     """Someone force-pushes: the PR's head moves on."""
-    app.state.session.gh.head = "e2e1111newhead"
+    app.state.session.gh.head = "e2e1111bbbb2"
     return {"ok": True}
 
 
@@ -152,15 +162,22 @@ async def signout():
     return {"ok": True}
 
 
+SYNC_PATCH = "@@ -1,5 +1,5 @@\n from .models import Order\n \n \n-def send(order):\n+def send(order, retries=3):\n     return order.total()"
+HEAD_FILES = {
+    **SHOP,
+    "shop/sync.py": SHOP["shop/sync.py"].replace("def send(order):", "def send(order, retries=3):"),
+    "docs/retry.md": DOC,
+}
+
+
 class FakeCheckouts:
+    """The PR's head: a small shop package (see tests/repo_fixture.py) plus the spec."""
+
     def has_clone(self, *, owner, repo):
         return True
 
     async def worktree(self, *, owner, repo, sha, token):
-        path = DATA / "wt" / sha / "docs"
-        path.mkdir(parents=True, exist_ok=True)
-        (path / "retry.md").write_text(DOC)
-        return path.parent
+        return write_repo(DATA / "wt" / sha, HEAD_FILES)
 
 
 ANSWER = " ".join(["Retries back off exponentially from one second, doubling each time."] * 12)
@@ -181,6 +198,7 @@ async def reset():
     app.state.session = FakeSession()
     app.state.store.close()
     app.state.store = Store.open(DATA / f"state-{next(ids)}.db")
+    app.state.maps = MapJobs(DATA / f"maps-{next(ids)}", app.state.checkouts)
     return {"ok": True}
 
 
@@ -193,6 +211,7 @@ async def main():
     app.state.store = Store.open(DATA / "state.db")
     app.state.claude_cli = "/fake/claude"
     app.state.checkouts = FakeCheckouts()
+    app.state.maps = MapJobs(DATA / "maps", app.state.checkouts)
     app.state.turns = TurnRunner()
     claude_api.claude.ask = fake_ask
     await serving

@@ -34,7 +34,7 @@ export function FileNodeCard({ node: n, maxSize, highlighted, selected, onOpen }
           </span>
           {symbols.length > 0 && (
             <button className="ml-auto text-[11px] font-medium hover:underline" onClick={() => setOpen(!open)}>
-              {open ? "▾" : "▸"} {symbols.length} symbols
+              {open ? "▾" : "▸"} {symbols.length} symbol{symbols.length === 1 ? "" : "s"}
             </button>
           )}
         </div>
