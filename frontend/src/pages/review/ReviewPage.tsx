@@ -1,11 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useBlocker, useNavigate, useParams } from "react-router";
+import { Navigate, useBlocker, useNavigate, useParams, useSearchParams } from "react-router";
 import { activityKey, apiBase, claudeKey, useClaudeThreads, useLiveActivity, usePage } from "../../api/queries";
 import { ApiError, onSignedOut, request } from "../../api/request";
 import type { ClaudeThread, Comment, Page, Thread } from "../../api/types";
 import { Toaster } from "../../components/Toaster";
 import { applyActivity, initialSeen, type SeenState } from "../../lib/activity";
+import { scrollToLine } from "../../lib/scrollToLine";
 import { headingCounts, isBotThread, isShown, stepThread } from "../../lib/threads";
 import { createReviewStore, ReviewStoreContext, useReview, useReviewStore, type ComposerTarget } from "../../state/review";
 import { recordRecent } from "../../state/recents";
@@ -17,13 +18,15 @@ import { ReviewPageCtx, type ReviewPageContext } from "./context";
 import { Conversation } from "./Conversation";
 import { FinishReview, type ReviewEvent } from "./FinishReview";
 import { Description } from "./Description";
-import { defaultView, FileSection, type FileView } from "./FileSection";
+import { defaultView, FileSection, viewForLine, type FileView } from "./FileSection";
 import { useClaudeStreams } from "./hooks/claudeStream";
 import { useKeyboard } from "./hooks/useKeyboard";
 import type { MarginEngine } from "./hooks/useMarginEngine";
 import { useMermaid } from "./hooks/useMermaid";
 import { Margin } from "./Margin";
+import { LogicView } from "../logic/LogicView";
 import { GutterButton } from "./GutterButton";
+import { PageTabs } from "./PageTabs";
 import { PrSwitcher } from "./PrSwitcher";
 import { Rail } from "./Rail";
 import { ReplyBox } from "./ReplyBox";
@@ -280,6 +283,32 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
 
   const [reviewOpen, setReviewOpen] = useState(false);
 
+  // The page's views: Review, and Logic when Claude is available. Kept in ?view= so reloads keep it.
+  const [params, setParams] = useSearchParams();
+  const tab = page.claude && params.get("view") === "logic" ? "logic" : "review";
+  const [logicVisited, setLogicVisited] = useState(tab === "logic");
+  const setTab = (id: string) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (id === "logic") next.set("view", "logic");
+      else next.delete("view");
+      return next;
+    });
+  useEffect(() => {
+    if (tab === "logic") setLogicVisited(true);
+    // Back from Logic: the hidden page had no layout, so re-place the margin threads.
+    else requestAnimationFrame(() => window.dispatchEvent(new Event("spec-tackle:layout")));
+  }, [tab]);
+  const showInReview = (path: string, line: number) => {
+    setTab("review");
+    const file = page.files.find((f) => f.path === path);
+    if (!file) return;
+    const view = viewForLine(file, line);
+    setViewChoices((v) => ({ ...v, [path]: view }));
+    // Wait for the page to show and the file to switch views before scrolling.
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToLine(path, line, view)));
+  };
+
   const postConversation = async (body: string) => {
     try {
       const created = await request<Comment>("POST", `${api}/conversation`, { body });
@@ -316,16 +345,17 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     else toast("No open threads 🎉");
   };
 
+  const onReview = tab === "review";
   useKeyboard({
-    step,
+    step: (direction) => { if (onReview) step(direction); },
     escape: () => {
       if (store.getState().composer && !composerDirty.current) closeComposer();
       activate(null);
     },
-    comment: commentOnSelection,
+    comment: (mode) => onReview && commentOnSelection(mode),
     switcher: () => setSwitcherOpen(true),
     reply: () => {
-      if (!active) return;
+      if (!active || !onReview) return;
       document.querySelector<HTMLTextAreaElement>(`[data-card="${CSS.escape(active)}"] .thread-reply textarea`)?.focus();
     },
   });
@@ -366,12 +396,20 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         newCommits={activity.headSha !== renderedSha}
         onRefresh={() => live.refresh()}
         onFinishReview={() => setReviewOpen(true)}
+        tabs={page.claude && (
+          <PageTabs tabs={[{ id: "review", label: "Review" }, { id: "logic", label: "Logic" }]} active={tab} onSelect={setTab} />
+        )}
         switcher={
           <PrSwitcher current={{ ...pr, title: page.overview.title }} open={switcherOpen}
             onOpenChange={setSwitcherOpen} beforeLeave={confirmDiscard} />
         }
       />
-      <div className="flex">
+      {logicVisited && (
+        <div hidden={tab !== "logic"}>
+          <LogicView pr={pr} head={renderedSha} onShowInReview={showInReview} />
+        </div>
+      )}
+      <div className="flex" hidden={tab !== "review"}>
         <Rail files={page.files} views={views} claude={page.claude} stats={stats} headingCounts={counts}
           conversationCount={conversationCount} onStep={step} />
         <div className="min-w-0 flex-1 px-4 py-8 lg:px-8">
@@ -383,7 +421,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
               })} />
               <Description overview={page.overview} />
               {page.files.map((file, i) => (
-                <FileSection key={file.path} file={file} index={i + 1} onViewChange={(path, view) => setViewChoices((v) => ({ ...v, [path]: view }))} />
+                <FileSection key={file.path} file={file} index={i + 1} view={viewChoices[file.path]} onViewChange={(path, view) => setViewChoices((v) => ({ ...v, [path]: view }))} />
               ))}
               <Conversation items={activity.conversation} fresh={seenState.fresh} hideBots={hideBots} onPost={postConversation} />
             </main>

@@ -4,7 +4,13 @@ import { Html } from "../../components/Html";
 
 export type FileView = "rendered" | "diff";
 
-type Props = { file: PageFile; index: number; onViewChange?: (path: string, view: FileView) => void };
+type Props = {
+  file: PageFile;
+  index: number;
+  /** Set from outside (e.g. the Logic view's "Show in Review"); otherwise the file keeps its own. */
+  view?: FileView;
+  onViewChange?: (path: string, view: FileView) => void;
+};
 
 /** Whether a file can switch between Document and Changes. */
 export function hasViewToggle(file: PageFile): boolean {
@@ -16,11 +22,18 @@ export function defaultView(file: PageFile): FileView {
   return file.rendered && !hasViewToggle(file) ? "rendered" : "diff";
 }
 
-export function FileSection({ file, index, onViewChange }: Props) {
+/** The view that shows `line`: Changes when it's in the diff, else the document. Files without a toggle keep theirs. */
+export function viewForLine(file: PageFile, line: number): FileView {
+  if (!hasViewToggle(file)) return defaultView(file);
+  return file.hunks.some(([start, end]) => start <= line && line <= end) ? "diff" : "rendered";
+}
+
+export function FileSection({ file, index, view: chosen, onViewChange }: Props) {
   const toggle = hasViewToggle(file);
-  const [view, setView] = useState<FileView>(defaultView(file));
+  const [own, setOwn] = useState<FileView>(defaultView(file));
+  const view = chosen ?? own;
   const pick = (v: FileView) => {
-    setView(v);
+    setOwn(v);
     onViewChange?.(file.path, v);
   };
   return (

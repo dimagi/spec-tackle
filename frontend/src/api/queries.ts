@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 import type { PRRef } from "../state/storage";
 import { request } from "./request";
-import type { Activity, ClaudeThread, Page, PrSummary, Repo, Session } from "./types";
+import type { Activity, ClaudeThread, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
 
 export const POLL_MS = 30_000;
 
@@ -94,5 +94,23 @@ export function useOpenPulls(owner: string, repo: string) {
     queryKey: ["pulls", owner, repo],
     queryFn: () => request<PrSummary[]>("GET", `/api/repos/${owner}/${repo}/pulls`),
     staleTime: 60_000,
+  });
+}
+
+export const logicKey = (pr: PRRef, head: string) => ["logic", pr.owner, pr.repo, pr.number, head];
+
+/** The Logic view's map for this PR, and whether one is being generated for `head`. */
+export function useLogic(pr: PRRef, head: string) {
+  return useQuery({
+    queryKey: logicKey(pr, head),
+    queryFn: () => request<LogicState>("GET", `${apiBase(pr)}/logic?head=${encodeURIComponent(head)}`),
+  });
+}
+
+export function useLogicFunctions(mapId: string, blockId: string) {
+  return useQuery({
+    queryKey: ["logic-functions", mapId, blockId],
+    queryFn: () => request<LogicFunctions>("GET", `/api/logic/${encodeURIComponent(mapId)}/blocks/${encodeURIComponent(blockId)}/functions`),
+    staleTime: Infinity,
   });
 }

@@ -110,3 +110,27 @@ export type ClaudeThread = {
 };
 
 export type Session = { viewer: Viewer | null; ghCli: boolean; claude: boolean };
+
+export type LogicKind = "entry" | "step" | "decision" | "loop" | "async" | "exit";
+export type LogicChange = "added" | "changed" | "unchanged";
+export type FunctionRef = { path: string; symbol: string; start: number; end: number };
+
+export type LogicBlock = {
+  id: string; label: string; kind: LogicKind; change: LogicChange;
+  next: { to: string; label?: string }[];
+  children?: LogicBlock[];
+  functions?: FunctionRef[];
+};
+
+export type LogicMap = { id: string; headSha: string; summary: string; blocks: LogicBlock[]; createdAt: string };
+
+/** GET/POST …/logic. `head` comes back from POST: the commit the run is for. */
+export type LogicState = { available: boolean; map: LogicMap | null; stale: boolean; running: boolean; head?: string };
+
+export type LogicFunction = FunctionRef & {
+  lines: { n: number; html: string; changed: boolean }[];
+  inDiff: boolean;
+  missing?: string;
+};
+
+export type LogicFunctions = { label: string; headSha: string; functions: LogicFunction[] };

@@ -382,3 +382,30 @@ kbd { font: 500 10px "JetBrains Mono", monospace; padding: 0 4px; border-radius:
 html.dark .claude-error { color: #fca5a5; }
 .spinner { display: inline-block; width: 10px; height: 10px; border-radius: 999px; border: 2px solid var(--claude); border-right-color: transparent; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* -- Logic view ------------------------------------------------------------ */
+
+.line-flash { animation: line-flash 2s ease-out; }
+@keyframes line-flash { 0%, 30% { background: rgba(251, 191, 36, .35); } 100% { background: transparent; } }
+
+.logic-chart svg { max-width: 100%; height: auto; margin: 0 auto; display: block; }
+.logic-hit { cursor: pointer; outline: none; }
+.logic-hit:hover > rect, .logic-hit:hover > polygon, .logic-hit:hover > path { filter: brightness(.96); }
+.logic-hit:focus-visible > rect, .logic-hit:focus-visible > polygon, .logic-hit:focus-visible > path,
+.logic-hit.is-selected > rect, .logic-hit.is-selected > polygon, .logic-hit.is-selected > path {
+  stroke: var(--claude) !important; stroke-width: 3px !important;
+}
+.logic-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid; }
+.logic-swatch.added { background: #d1fae5; border-color: #059669; }
+.logic-swatch.changed { background: #fef3c7; border-color: #d97706; }
+.logic-swatch.unchanged { background: #f5f5f4; border-color: #a8a29e; }
+
+.logic-code { margin: 0; overflow-x: auto; border-radius: .5rem; border: 1px solid var(--paper-border); background: var(--code-bg); font-size: 12px; line-height: 1.6; padding: .25rem 0; }
+.logic-line { display: flex; white-space: pre; padding-right: .75rem; }
+.logic-line .ln { flex: none; width: 3.25rem; padding-right: .75rem; text-align: right; color: var(--muted); opacity: .7; user-select: none; }
+.logic-line.changed { background: rgba(16, 185, 129, .10); box-shadow: inset 3px 0 0 #10b981; }
+
+.logic-item { text-align: left; border-radius: .375rem; padding: .125rem .5rem; border-left: 3px solid transparent; }
+.logic-item:hover { background: rgba(120, 113, 108, .1); }
+.logic-item.added { border-left-color: #059669; }
+.logic-item.changed { border-left-color: #d97706; }
