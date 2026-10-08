@@ -126,6 +126,11 @@ def test_outline_extracts_headings_with_lines():
     assert len({i["id"] for i in items}) == 3
 
 
+def test_outline_text_is_plain_text_not_html():
+    items = render.outline(_render("## A `b` -> [c](x) & d\n"))
+    assert items[0]["text"] == "A b -> c & d"
+
+
 def test_diff_marks_new_side_lines_only():
     html = render.render_diff(PATCH, "spec.md")
     assert 'class="diff-add" data-ls="2"' in html
