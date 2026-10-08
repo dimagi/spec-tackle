@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 import type { PRRef } from "../state/storage";
 import { request } from "./request";
-import type { Activity, ClaudeThread, Page, Session } from "./types";
+import type { Activity, ClaudeThread, Page, ReviewRequest, Session } from "./types";
 
 export const POLL_MS = 30_000;
 
@@ -21,6 +21,16 @@ export function usePage(pr: PRRef) {
     queryKey: ["page", pr.owner, pr.repo, pr.number],
     queryFn: () => request<Page>("GET", `${apiBase(pr)}/page`),
     staleTime: Infinity,
+  });
+}
+
+/** Open PRs waiting on the viewer's review; fetched only once the switcher has been opened. */
+export function useReviewRequests(enabled: boolean) {
+  return useQuery({
+    queryKey: ["review-requests"],
+    queryFn: () => request<ReviewRequest[]>("GET", "/api/review-requests"),
+    enabled,
+    staleTime: 2 * 60_000,
   });
 }
 

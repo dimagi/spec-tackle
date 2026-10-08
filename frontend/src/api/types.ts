@@ -56,6 +56,11 @@ export type PageFile = {
 
 export type PRInfo = { owner: string; repo: string; number: number; url: string };
 
+export type ReviewRequest = {
+  owner: string; repo: string; number: number; title: string;
+  author: string | null; updatedAt: string; isDraft: boolean; url: string;
+};
+
 export type Overview = {
   title: string;
   url: string;
