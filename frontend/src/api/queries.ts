@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 import type { PRRef } from "../state/storage";
 import { request } from "./request";
-import type { Activity, ClaudeThread, Page, ReviewRequest, Session } from "./types";
+import type { Activity, ClaudeThread, Page, PrSummary, Repo, Session } from "./types";
 
 export const POLL_MS = 30_000;
 
@@ -28,7 +28,7 @@ export function usePage(pr: PRRef) {
 export function useReviewRequests(enabled: boolean) {
   return useQuery({
     queryKey: ["review-requests"],
-    queryFn: () => request<ReviewRequest[]>("GET", "/api/review-requests"),
+    queryFn: () => request<PrSummary[]>("GET", "/api/review-requests"),
     enabled,
     staleTime: 2 * 60_000,
   });
@@ -76,5 +76,23 @@ export function useClaudeThreads(pr: PRRef, enabled: boolean) {
     queryKey: claudeKey(pr),
     queryFn: () => request<ClaudeThread[]>("GET", `${apiBase(pr)}/claude/threads`),
     enabled,
+  });
+}
+
+/** Repos to browse: yours when `query` is empty, else a GitHub search. */
+export function useRepos(query: string, enabled = true) {
+  return useQuery({
+    queryKey: ["repos", query],
+    queryFn: () => request<Repo[]>("GET", query ? `/api/repos?q=${encodeURIComponent(query)}` : "/api/repos"),
+    enabled,
+    staleTime: 2 * 60_000,
+  });
+}
+
+export function useOpenPulls(owner: string, repo: string) {
+  return useQuery({
+    queryKey: ["pulls", owner, repo],
+    queryFn: () => request<PrSummary[]>("GET", `/api/repos/${owner}/${repo}/pulls`),
+    staleTime: 60_000,
   });
 }

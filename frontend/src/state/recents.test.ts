@@ -1,4 +1,4 @@
-import { loadRecents, recordRecent, removeRecent } from "./recents";
+import { loadRecents, recentRepos, recordRecent, removeRecent } from "./recents";
 
 const KEY = "spec-tackle:recent-prs";
 const pr = (number: number, title = `PR ${number}`) => ({ owner: "o", repo: "r", number, title });
@@ -51,4 +51,11 @@ test("works when storage throws", () => {
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("denied"); });
   expect(() => recordRecent(pr(1))).not.toThrow();
   expect(loadRecents()).toEqual([]);
+});
+
+test("recentRepos lists each repo once, most recent first", () => {
+  recordRecent({ owner: "a", repo: "x", number: 1, title: "one" });
+  recordRecent({ owner: "b", repo: "y", number: 2, title: "two" });
+  recordRecent({ owner: "a", repo: "x", number: 3, title: "three" });
+  expect(recentRepos()).toEqual([{ owner: "a", repo: "x" }, { owner: "b", repo: "y" }]);
 });

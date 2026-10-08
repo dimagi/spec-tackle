@@ -105,6 +105,15 @@ class FakeGitHub:
         self.reviews.append({**r, "state": state, "submittedAt": r["createdAt"]})
         return {"id": r["databaseId"]}
 
+    async def repos(self, query=""):
+        return [{"owner": "o", "repo": "r", "description": "Form submission specs", "isPrivate": False,
+                 "pushedAt": "2026-10-08T09:00:00Z", "openPrs": 2}]
+
+    async def open_pulls(self, owner, repo):
+        return [{"owner": owner, "repo": repo, "number": n, "title": TITLES[n], "author": "ann",
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": f"https://github.com/{owner}/{repo}/pull/{n}"}
+                for n in (8, 7)]
+
     async def review_requests(self):
         return [{"owner": "o", "repo": "r", "number": 8, "title": TITLES[8], "author": "ann",
                  "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]

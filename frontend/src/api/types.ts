@@ -56,9 +56,15 @@ export type PageFile = {
 
 export type PRInfo = { owner: string; repo: string; number: number; url: string };
 
-export type ReviewRequest = {
+/** A PR in a list: the review queue or a repo's open PRs. */
+export type PrSummary = {
   owner: string; repo: string; number: number; title: string;
   author: string | null; updatedAt: string; isDraft: boolean; url: string;
+};
+
+export type Repo = {
+  owner: string; repo: string; description: string | null;
+  isPrivate: boolean; pushedAt: string | null; openPrs: number;
 };
 
 export type Overview = {

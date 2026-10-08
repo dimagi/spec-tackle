@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useReviewRequests } from "../../api/queries";
-import { RelativeTime } from "../../components/RelativeTime";
+import { Option, PrRow, Section, Status, useHighlight } from "../../components/Picker";
 import { parsePrRef, prPath, samePr } from "../../lib/prRef";
 import { loadRecents, removeRecent, type RecentPr } from "../../state/recents";
 import type { PRRef } from "../../state/storage";
@@ -20,9 +20,18 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
   const requests = useReviewRequests(open);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [highlight, setHighlight] = useState(0);
   const [recents, setRecents] = useState<RecentPr[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  const pasted = parsePrRef(text);
+  const query = pasted ? "" : text.trim().toLowerCase();
+  const matches = (pr: PRRef, title: string) =>
+    !query || `${pr.owner}/${pr.repo} #${pr.number} ${title}`.toLowerCase().includes(query);
+  const queue = requests.data ?? [];
+  const requested = queue.filter((r) => matches(r, r.title));
+  const recent = recents.filter((r) => !queue.some((q) => samePr(q, r)) && matches(r, r.title));
+  const rows: PRRef[] = [...requested, ...recent];
+  const { highlight, setHighlight, move } = useHighlight(rows.length);
 
   useEffect(() => {
     if (!open) return;
@@ -37,15 +46,6 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
     return () => document.removeEventListener("mousedown", onDown);
   }, [open, onOpenChange]);
 
-  const pasted = parsePrRef(text);
-  const query = pasted ? "" : text.trim().toLowerCase();
-  const matches = (pr: PRRef, title: string) =>
-    !query || `${pr.owner}/${pr.repo} #${pr.number} ${title}`.toLowerCase().includes(query);
-  const queue = requests.data ?? [];
-  const requested = queue.filter((r) => matches(r, r.title));
-  const recent = recents.filter((r) => !queue.some((q) => samePr(q, r)) && matches(r, r.title));
-  const rows: PRRef[] = [...requested, ...recent];
-
   const go = (pr: PRRef) => {
     if (samePr(pr, current)) return onOpenChange(false);
     if (!beforeLeave()) return;
@@ -54,9 +54,8 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setHighlight((h) => Math.min(h + 1, rows.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)); }
-    else if (e.key === "Escape") { e.preventDefault(); onOpenChange(false); }
+    if (move(e)) return;
+    if (e.key === "Escape") { e.preventDefault(); onOpenChange(false); }
     else if (e.key === "Enter") {
       e.preventDefault();
       if (pasted) go(pasted);
@@ -83,16 +82,7 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
   );
   else if (!queue.length) queueBody = <Status>Nothing waiting on you</Status>;
   else if (!requested.length) queueBody = <Status>No matches</Status>;
-  else queueBody = requested.map((r, i) => option(r, i, (
-    <>
-      <div className="flex items-center gap-2 text-xs text-stone-500">
-        <span className="font-mono">{r.owner}/{r.repo} #{r.number}</span>
-        {r.isDraft && <span className="rounded bg-stone-200 px-1.5 text-[10px] font-semibold uppercase dark:bg-stone-700">draft</span>}
-      </div>
-      <div className="truncate font-medium">{r.title}</div>
-      <div className="text-xs text-stone-500">{r.author ?? "ghost"} · updated <RelativeTime iso={r.updatedAt} /></div>
-    </>
-  )));
+  else queueBody = requested.map((r, i) => option(r, i, <PrRow pr={r} />));
 
   return (
     <div ref={rootRef} className="relative min-w-0">
@@ -127,46 +117,6 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
             )}
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div role="group" aria-label={title} className="mb-1">
-      <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-stone-500">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Status({ children }: { children: ReactNode }) {
-  return <div className="px-2 py-1.5 text-sm text-stone-500">{children}</div>;
-}
-
-type OptionProps = {
-  active: boolean; current: boolean; children: ReactNode; removeLabel: string;
-  onPick: () => void; onHover: () => void; onRemove?: () => void;
-};
-
-function Option({ active, current, children, removeLabel, onPick, onHover, onRemove }: OptionProps) {
-  return (
-    <div
-      role="option" aria-selected={active} onClick={onPick} onMouseEnter={onHover}
-      // Keep focus in the input so the keyboard keeps working.
-      onMouseDown={(e) => e.preventDefault()}
-      className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${active ? "bg-amber-100 dark:bg-amber-500/15" : ""}`}
-    >
-      <span className="w-3 shrink-0 text-amber-600 dark:text-amber-400">
-        {current && <span aria-label="Current pull request">✓</span>}
-      </span>
-      <div className="min-w-0 flex-1">{children}</div>
-      {onRemove && (
-        <button type="button" aria-label={removeLabel} onClick={(e) => { e.stopPropagation(); onRemove(); }}
-          className="rounded px-1.5 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200">
-          ×
-        </button>
       )}
     </div>
   );

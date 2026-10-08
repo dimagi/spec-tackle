@@ -3,13 +3,13 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
-import type { ReviewRequest } from "../../api/types";
+import type { PrSummary } from "../../api/types";
 import { loadRecents, recordRecent } from "../../state/recents";
 import { PrSwitcher } from "./PrSwitcher";
 
 const CURRENT = { owner: "o", repo: "r", number: 7, title: "Add spec" };
 
-const req = (number: number, title: string, over: Partial<ReviewRequest> = {}): ReviewRequest => ({
+const req = (number: number, title: string, over: Partial<PrSummary> = {}): PrSummary => ({
   owner: "dimagi", repo: "app", number, title, author: "ann",
   updatedAt: "2026-10-08T09:00:00Z", isDraft: false, url: `https://github.com/dimagi/app/pull/${number}`, ...over,
 });

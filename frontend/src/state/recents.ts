@@ -42,3 +42,14 @@ export function removeRecent(pr: PRRef): RecentPr[] {
   save(list);
   return list;
 }
+
+/** The repos of recently opened PRs, each once, most recent first. */
+export function recentRepos(): { owner: string; repo: string }[] {
+  const seen = new Set<string>();
+  return loadRecents().flatMap(({ owner, repo }) => {
+    const key = `${owner}/${repo}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ owner, repo }];
+  });
+}
