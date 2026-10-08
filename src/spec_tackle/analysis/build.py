@@ -6,6 +6,7 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
+from .changes import change_graph, change_nodes
 from .graph import build_graph, find_packages, hop1, indirect, module_name, module_path, references
 from .patches import base_text, changed_lines
 from .reading import phase_for, reading_order, tag_for
@@ -28,10 +29,15 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
     symbols: dict[str, list[Symbol]] = {}
     base_missing = False
     modules: dict[str, str | None] = {}
+    prepared: list[dict] = []  # per file: sources, changed lines and symbols, for the change graph
 
     for f in files:
         path = f["path"]
         modules[path] = module_name(path, prefix)
+        added, removed = changed_lines(f.get("patch"))
+        entry = {"path": path, "status": f["status"], "head_src": None, "base_src": None,
+                 "added": added, "removed": removed, "symbols": []}
+        prepared.append(entry)
         if not path.endswith(".py"):
             continue
         head = "" if f["status"] == "removed" else _read(worktree / path)
@@ -39,16 +45,18 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
             base = head  # moved without edits: GitHub sends no patch, and nothing changed
         else:
             base = base_text(head, f.get("patch"), f["status"])
+        entry["head_src"] = head
         if base is None and f["status"] != "added":
             base_missing = True
             symbols[path] = []
             continue
-        added, removed = changed_lines(f.get("patch"))
+        entry["base_src"] = base
         try:
-            symbols[path] = changed_symbols(base, head, added, removed)
+            symbols[path] = entry["symbols"] = changed_symbols(base, head, added, removed)
         except SyntaxError:
             skipped.append({"path": path, "reason": "syntax error"})
             symbols[path] = []
+            entry["head_src"] = None
 
     graph = None
     if packages and not os.environ.get("SPEC_TACKLE_NO_GRAPH"):
@@ -96,8 +104,11 @@ def build_map(worktree: Path, files: list[dict]) -> dict:
             for m in d["imports"]:
                 edges.append({"from": d["path"], "to": path_of[m], "symbols": d["references"]})
 
+    changes = change_graph(prepared, change_nodes(prepared), graph, import_root, worktree, modules)
+
     return {
         "status": "ready",
+        "changes": changes,
         "nodes": nodes,
         "edges": edges,
         "readingPath": reading_order([{"path": f["path"], "module": modules[f["path"]]} for f in files], graph),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import difflib
 import re
 
@@ -103,3 +104,272 @@ def _merge_moves(nodes: list[dict], bodies: dict[str, str]) -> list[dict]:
         used.add(a_id)
         gone.add(r_id)
     return [n for n in nodes if n["id"] not in gone]
+
+
+# -- edges --------------------------------------------------------------------
+
+SEVERITY = {"breaks-removed": 5, "breaks-signature": 4, "uses": 3, "probable": 2, "tests": 1, "replaced": 0}
+
+
+class _Scope:
+    """What names mean inside one module: its imports and its own top-level definitions."""
+
+    def __init__(self, tree: ast.Module, module: str, is_package: bool, known_modules: set[str]):
+        self.module = module
+        self.aliases: dict[str, str] = {}  # local name → module
+        self.imported: dict[str, tuple[str, str]] = {}  # local name → (module, name)
+        self.own = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+        self.own |= {t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    self.aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+            elif isinstance(node, ast.ImportFrom):
+                base = _resolve(module, is_package, node)
+                for a in node.names:
+                    local = a.asname or a.name
+                    if f"{base}.{a.name}" in known_modules:
+                        self.aliases[local] = f"{base}.{a.name}"
+                    else:
+                        self.imported[local] = (base, a.name)
+
+    def resolve(self, expr: ast.expr, cls: str | None) -> list[tuple[str, str]]:
+        """Candidate (module, qualname) targets for a Name or Attribute."""
+        if isinstance(expr, ast.Name):
+            if expr.id in self.imported:
+                return [self.imported[expr.id]]
+            if expr.id in self.own:
+                return [(self.module, expr.id)]
+            return []
+        if not isinstance(expr, ast.Attribute):
+            return []
+        parts = _dotted(expr)
+        if not parts:
+            return []
+        root, rest = parts[0], parts[1:]
+        if root in ("self", "cls") and cls:
+            return [(self.module, f"{cls}.{rest[0]}")]
+        if root in self.aliases:
+            module = self.aliases[root]
+            out = []
+            for i in range(len(rest)):  # a.b.c.f → module a.b.c, name f (longest module wins)
+                mod = ".".join([module, *rest[:i]])
+                out.append((mod, rest[i]))
+                if i + 1 < len(rest):
+                    out.append((mod, f"{rest[i]}.{rest[i + 1]}"))
+            return out
+        if root in self.imported:  # SomeClass.method
+            mod, name = self.imported[root]
+            return [(mod, f"{name}.{rest[0]}")]
+        if root in self.own:
+            return [(self.module, f"{root}.{rest[0]}")]
+        return []
+
+    def receiver_unknown(self, expr: ast.Attribute) -> bool:
+        parts = _dotted(expr)
+        if not parts:
+            return True
+        return parts[0] not in ("self", "cls") and parts[0] not in self.aliases and parts[0] not in self.imported and parts[0] not in self.own
+
+
+def _resolve(importer: str, is_package: bool, node: ast.ImportFrom) -> str:
+    if not node.level:
+        return node.module or ""
+    parts = importer.split(".")
+    package = parts if is_package else parts[:-1]
+    package = package[: len(package) - (node.level - 1)]
+    return ".".join(package + ([node.module] if node.module else []))
+
+
+def _dotted(expr: ast.expr) -> list[str] | None:
+    parts = []
+    while isinstance(expr, ast.Attribute):
+        parts.append(expr.attr)
+        expr = expr.value
+    if not isinstance(expr, ast.Name):
+        return None
+    return [expr.id, *reversed(parts)]
+
+
+def _units(tree: ast.Module) -> list[tuple[str, list[ast.AST], str | None]]:
+    """(qualname, statements, enclosing class) for every function, method, class attribute
+    and the module-level code of a file."""
+    units: list[tuple[str, list[ast.AST], str | None]] = []
+    module_level: list[ast.AST] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            units.append((node.name, [node], None))
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    units.append((f"{node.name}.{item.name}", [item], node.name))
+                elif isinstance(item, (ast.Assign, ast.AnnAssign)):
+                    targets = item.targets if isinstance(item, ast.Assign) else [item.target]
+                    for t in targets:
+                        if isinstance(t, ast.Name):
+                            units.append((f"{node.name}.{t.id}", [item], node.name))
+        else:
+            module_level.append(node)
+    units.append((MODULE, module_level, None))
+    return units
+
+
+def _references(scope: _Scope, statements: list[ast.AST], cls: str | None):
+    """Yield (kind, payload, line): ("ref", [(module, qual)…]), ("import", (module, name)) or ("method", name)."""
+    for stmt in statements:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.ImportFrom):
+                for a in node.names:
+                    local = a.asname or a.name
+                    if local in scope.imported:
+                        yield "import", scope.imported[local], node.lineno
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and scope.receiver_unknown(node.func):
+                yield "method", node.func.attr, node.lineno
+            elif isinstance(node, (ast.Name, ast.Attribute)) and not isinstance(getattr(node, "ctx", None), ast.Store):
+                found = scope.resolve(node, cls)
+                if found:
+                    yield "ref", found, node.lineno
+
+
+def change_graph(prepared: list[dict], nodes: list[dict], graph, import_root, worktree, module_of) -> dict:
+    """Edges between changes, unchanged callers, and the order to read the changes in.
+
+    `prepared` are the PR's files as passed to change_nodes; `module_of` maps paths to modules.
+    """
+    from .graph import module_path
+    from .reading import PHASES, _dependency_order, phase_for
+
+    by_id = {n["id"]: n for n in nodes}
+    path_of_module = {m: p for p, m in module_of.items() if m}
+    live: dict[tuple[str, str], str] = {}  # (module, qualname) → node id, as the code is now
+    gone: dict[tuple[str, str], str] = {}  # (module, old qualname) → node id of what was removed or moved
+    methods: dict[str, list[str]] = {}
+    for n in nodes:
+        module = module_of.get(n["file"])
+        if not module or n["kind"] in ("file", "module"):
+            continue
+        if n["change"] == "removed":
+            gone[(module, n["name"])] = n["id"]
+        else:
+            live[(module, n["name"])] = n["id"]
+            if n["kind"] == "method":
+                methods.setdefault(n["name"].split(".")[-1], []).append(n["id"])
+        if n["change"] == "moved":
+            gone[(module_of.get(n["from"]["file"]) or "", n["from"]["name"])] = n["id"]
+    known = set(graph.modules) if graph is not None else set(path_of_module)
+
+    edges: dict[tuple[str, str], dict] = {}
+    callers: dict[str, dict] = {}
+
+    def add(src: str, dst: str, kind: str, line: int) -> None:
+        if src == dst:
+            return
+        key = (src, dst)
+        if key not in edges or SEVERITY[kind] > SEVERITY[edges[key]["type"]]:
+            edges[key] = {"from": src, "to": dst, "type": kind, "line": line}
+
+    def scan(path: str, module: str, source: str) -> None:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return
+        scope = _Scope(tree, module, path.endswith("__init__.py"), known)
+        testing = phase_for(path) == "tests"
+        for qual, statements, cls in _units(tree):
+            unit_id = f"{path}::{qual}"
+            changed = unit_id in by_id and by_id[unit_id]["change"] != "removed"
+            for kind, payload, line in _references(scope, statements, cls):
+                target, broken = None, False
+                if kind == "method":
+                    found = methods.get(payload, [])
+                    if len(found) == 1:
+                        target = found[0]
+                elif kind == "import":
+                    if payload in gone and payload not in live:
+                        target, broken = gone[payload], True
+                else:
+                    for cand in payload:
+                        if cand in live:
+                            target = live[cand]
+                            break
+                        if cand in gone:
+                            target, broken = gone[cand], True
+                            break
+                if target is None or target == unit_id:
+                    continue
+                if kind == "method":
+                    edge = "probable"
+                elif testing:
+                    edge = "tests"
+                elif broken:
+                    edge = "breaks-removed"
+                elif not changed and by_id[target]["signatureChanged"]:
+                    edge = "breaks-signature"
+                else:
+                    edge = "uses"
+                if not changed:
+                    callers.setdefault(unit_id, {
+                        "id": unit_id, "file": path, "label": "module-level" if qual == MODULE else (
+                            f"{qual}()" if not any(isinstance(s, ast.Assign) for s in statements) else qual),
+                        "kind": "caller", "change": "caller", "signatureChanged": False,
+                        "additions": 0, "deletions": 0, "lines": None, "baseLines": None, "name": qual,
+                    })
+                add(unit_id, target, edge, line)
+
+    # The PR's own files, then unchanged modules that import a changed one.
+    for f in prepared:
+        module = module_of.get(f["path"])
+        if module and f["head_src"]:
+            scan(f["path"], module, f["head_src"])
+    if graph is not None:
+        changed_modules = {module_of[f["path"]] for f in prepared if module_of.get(f["path"])} & set(graph.modules)
+        importers = set()
+        for m in changed_modules:
+            importers |= graph.find_modules_that_directly_import(m)
+        for m in sorted(importers - changed_modules):
+            path = module_path(import_root, m)
+            try:
+                source = path.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+            scan(path.relative_to(worktree).as_posix(), m, source)
+
+    _replacements(prepared, by_id, module_of, known, live, gone, add)
+
+    ids = [n["id"] for n in nodes]
+    deps = {i: set() for i in ids}
+    for e in edges.values():
+        if e["type"] in ("uses", "probable") and e["from"] in deps and e["to"] in deps:
+            deps[e["from"]].add(e["to"])
+    ordered = _dependency_order(ids, deps)
+    phase = {n["id"]: phase_for(n["file"]) for n in nodes}
+    reading = [{"phase": p, "ids": [i for i in ordered if phase[i] == p]} for p in PHASES if p in phase.values()]
+    if callers:
+        reading.append({"phase": "check", "ids": sorted(callers)})
+    return {"nodes": nodes + list(callers.values()), "edges": list(edges.values()), "readingPath": reading}
+
+
+def _replacements(prepared, by_id, module_of, known, live, gone, add) -> None:
+    """A removed symbol whose former users now use a newly added one: "replaced by?"."""
+    for f in prepared:
+        module = module_of.get(f["path"])
+        if not module or not f["head_src"] or not f["base_src"]:
+            continue
+        try:
+            head, base = ast.parse(f["head_src"]), ast.parse(f["base_src"])
+        except SyntaxError:
+            continue
+        is_pkg = f["path"].endswith("__init__.py")
+        head_scope, base_scope = _Scope(head, module, is_pkg, known), _Scope(base, module, is_pkg, known)
+        base_units = {q: (s, c) for q, s, c in _units(base)}
+        for qual, statements, cls in _units(head):
+            node = by_id.get(f"{f['path']}::{qual}")
+            if not node or node["change"] != "modified" or qual not in base_units:
+                continue
+            was = {gone[c] for k, p, _ in _references(base_scope, *base_units[qual]) if k == "ref" for c in p if c in gone}
+            now = {live[c] for k, p, _ in _references(head_scope, statements, cls) if k == "ref" for c in p
+                   if c in live and by_id[live[c]]["change"] == "added"}
+            for r in was:
+                if by_id[r]["change"] == "removed":
+                    for a in now:
+                        add(r, a, "replaced", 0)
