@@ -134,3 +134,61 @@ def test_map_route_starts_a_job_and_reports_head(web_app, tmp_path):
 def test_map_route_needs_sign_in(web_app):
     app.state.session.signed_in = False
     assert web_app.get("/api/pr/o/r/7/map").status_code == 401
+
+
+MAP = {**READY, "nodes": [
+    {"id": "shop/sync.py", "hop": 0}, {"id": "shop/models.py", "hop": 0}, {"id": "shop/tasks.py", "hop": 1},
+]}
+
+
+def cached_map(tmp_path):
+    j = jobs(tmp_path, FakeRun())
+    path = j._path(("o", "r", "bae5567", "abc1234"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(__import__("json").dumps(MAP))
+    return j
+
+
+def test_narration_keeps_one_line_per_changed_file(claude_app, tmp_path):
+    app.state.maps = cached_map(tmp_path)
+    claude_app.fake_ask.answer = (
+        'Here you go:\n{"shop/sync.py": "Adds retries.\\nMore detail.", "shop/models.py": "New Order model.",'
+        ' "shop/tasks.py": "not in the PR", "made/up.py": "nope"}'
+    )
+
+    notes = claude_app.post("/api/pr/o/r/7/map/narrate").json()
+
+    assert notes == {"shop/sync.py": "Adds retries.", "shop/models.py": "New Order model."}
+    prompt = claude_app.fake_ask.calls[0]["full_prompt"]
+    assert "shop/sync.py" in prompt and "shop/tasks.py" not in prompt
+
+
+def test_narration_is_cached(claude_app, tmp_path):
+    app.state.maps = cached_map(tmp_path)
+    claude_app.fake_ask.answer = '{"shop/sync.py": "Adds retries."}'
+    claude_app.post("/api/pr/o/r/7/map/narrate")
+    claude_app.post("/api/pr/o/r/7/map/narrate")
+    assert len(claude_app.fake_ask.calls) == 1
+
+
+def test_narration_waits_for_the_map(claude_app, tmp_path):
+    app.state.maps = jobs(tmp_path, FakeRun())
+    assert claude_app.post("/api/pr/o/r/7/map/narrate").status_code == 409
+
+
+def test_narration_needs_claude(web_app):
+    assert web_app.post("/api/pr/o/r/7/map/narrate").status_code == 404
+
+
+def test_a_claude_failure_comes_back_as_a_readable_error(claude_app, tmp_path, monkeypatch):
+    app.state.maps = cached_map(tmp_path)
+
+    async def broken(**kwargs):
+        raise RuntimeError("CLI crashed")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("spec_tackle.claude_api.claude.ask", broken)
+    response = claude_app.post("/api/pr/o/r/7/map/narrate")
+
+    assert response.status_code == 502
+    assert response.json()["detail"]

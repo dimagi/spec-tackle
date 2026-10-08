@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import mimetypes
 import sys
@@ -221,6 +222,43 @@ async def pr_map(request: Request, owner: str, repo: str, number: int):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {**result, "headSha": refs["headRefOid"]}
+
+
+@app.post("/api/pr/{owner}/{repo}/{number}/map/narrate")
+async def narrate_map(request: Request, owner: str, repo: str, number: int):
+    state = request.app.state
+    if not state.claude_cli:
+        raise HTTPException(404, "Claude Code isn't installed")
+    pr = PRRef(owner, repo, number)
+    client = await gh(request)
+    jobs: maps.MapJobs = state.maps
+    refs = await client.pr_refs(pr)
+    shas = {"owner": owner, "repo": repo, "base": refs["baseRefOid"], "head": refs["headRefOid"]}
+    if (notes := jobs.narration(**shas)) is not None:
+        return notes
+    found = jobs.cached(**shas)
+    if not found or found.get("status") != "ready":
+        raise HTTPException(409, "The map isn't ready yet")
+    paths = [n["id"] for n in found["nodes"] if n["hop"] == 0]
+    overview, files = await asyncio.gather(client.overview(pr), client.files(pr))
+    cwd = await state.checkouts.worktree(owner=owner, repo=repo, sha=refs["headRefOid"], token=client.token)
+    snapshot = claude.build_context(
+        overview=overview, files=files, markdown={},
+        activity=render.normalize_activity(overview), commit=refs["headRefOid"],
+    )
+    prompt = maps.NARRATE_PROMPT + "\n".join(paths)
+    answer = ""
+    try:
+        async for event in claude.ask(
+            cli=state.claude_cli, cwd=cwd, snapshot=snapshot, question=prompt, full_prompt=prompt, session_id=None,
+        ):
+            if event.kind == "done":
+                answer = event.text
+    except Exception as exc:  # noqa: BLE001 — any SDK failure is shown beside the button
+        raise HTTPException(502, claude.describe_error(exc))
+    notes = maps.parse_notes(answer, paths)
+    jobs.save_narration(**shas, notes=notes)
+    return notes
 
 
 @app.post("/api/pr/{owner}/{repo}/{number}/comments")

@@ -74,6 +74,13 @@ class MapJobs:
         path = self._path((owner, repo, base, head))
         return json.loads(path.read_text()) if path.exists() else None
 
+    def narration(self, *, owner: str, repo: str, base: str, head: str) -> dict | None:
+        path = self._path((owner, repo, base, head)).with_suffix(".narration.json")
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def save_narration(self, *, owner: str, repo: str, base: str, head: str, notes: dict) -> None:
+        self._path((owner, repo, base, head)).with_suffix(".narration.json").write_text(json.dumps(notes))
+
     async def _build(self, key: tuple, files: list[dict], token: str) -> None:
         owner, repo, _, head = key
         try:
@@ -90,3 +97,30 @@ class MapJobs:
             self._errors[key] = str(exc)
         finally:
             self._jobs.pop(key, None)
+
+
+NARRATE_PROMPT = """For each file below, write one short sentence saying why this PR changes it,
+from the point of view of a reviewer reading the PR in order. Answer with only a JSON object
+mapping each path to its sentence.
+
+Files:
+"""
+
+
+def parse_notes(answer: str, paths: list[str]) -> dict[str, str]:
+    """The first JSON object in Claude's answer, keeping one line per known path."""
+    start = answer.find("{")
+    while start != -1:
+        try:
+            data, _ = json.JSONDecoder().raw_decode(answer[start:])
+        except json.JSONDecodeError:
+            start = answer.find("{", start + 1)
+            continue
+        if isinstance(data, dict):
+            known = set(paths)
+            return {
+                p: str(v).strip().splitlines()[0][:200]
+                for p, v in data.items() if p in known and isinstance(v, str) and v.strip()
+            }
+        break
+    return {}
