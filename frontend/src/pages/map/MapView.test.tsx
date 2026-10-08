@@ -118,3 +118,29 @@ test("Enter still opens the file when focus is on a control outside the Map (e.g
   expect(onOpenFile).toHaveBeenCalledWith("shop/sync.py");
   tab.remove();
 });
+
+const withChanges = (n: number) => ({
+  ...ready,
+  changes: {
+    nodes: Array.from({ length: n }, (_, i) => ({
+      id: `shop/sync.py::f${i}`, file: "shop/sync.py", label: `f${i}()`, kind: "function", change: "modified",
+      signatureChanged: false, additions: 1, deletions: 0, lines: [i + 1, i + 1], baseLines: [i + 1, i + 1],
+    })),
+    edges: [],
+    readingPath: [{ phase: "core", ids: Array.from({ length: n }, (_, i) => `shop/sync.py::f${i}`) }],
+  },
+});
+
+test("the Changes mode lists individual changes", async () => {
+  renderMap(withChanges(2));
+  await userEvent.click(await screen.findByRole("button", { name: "Changes" }));
+  expect(await screen.findByText("f0()")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Only risky" })).toBeInTheDocument();
+});
+
+test("very large PRs can't switch to Changes", async () => {
+  renderMap(withChanges(401));
+  const changesButton = await screen.findByRole("button", { name: "Changes" });
+  expect(changesButton).toBeDisabled();
+  expect(changesButton).toHaveAttribute("title", expect.stringMatching(/too many changes/));
+});

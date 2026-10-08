@@ -105,7 +105,8 @@ export function MapGraph({ map, hover, selected, onHover, onSelect, onOpen }: Pr
       selectable: false, draggable: false, focusable: false,
     })),
     ...map.nodes.filter((n) => positions.has(n.id)).map((n) => ({
-      id: n.id, type: "file", position: positions.get(n.id)!, draggable: false,
+      // "nopan": pressing a file mustn't start panning, or the click lands on the pane instead.
+      id: n.id, type: "file", className: "nopan", position: positions.get(n.id)!, draggable: false,
       data: { node: n, maxSize, highlighted: n.id === focus, selected: n.id === selected, onOpen },
       zIndex: n.id === focus ? 10 : 1,
     })),
@@ -128,7 +129,7 @@ export function MapGraph({ map, hover, selected, onHover, onSelect, onOpen }: Pr
   return (
     <ReactFlow
       nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2}
-      nodesConnectable={false} elementsSelectable={false} proOptions={{ hideAttribution: true }}
+      nodesConnectable={false} nodesDraggable={false} selectNodesOnDrag={false} elementsSelectable={false} proOptions={{ hideAttribution: true }}
       onNodeMouseEnter={(_, node) => { if (node.type === "file") onHover(node.id); }}
       onNodeMouseLeave={() => onHover(null)}
       onNodeClick={(_, node) => { if (node.type === "file") onSelect(node.id); }}

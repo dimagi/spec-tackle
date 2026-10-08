@@ -32,6 +32,7 @@ import { TopBar } from "./TopBar";
 
 // React Flow is only needed on the Map tab.
 const MapGraph = lazy(() => import("../map/MapGraph").then((m) => ({ default: m.MapGraph })));
+const ChangeGraph = lazy(() => import("../map/ChangeGraph").then((m) => ({ default: m.ChangeGraph })));
 
 export function ReviewPage() {
   const params = useParams();
@@ -367,6 +368,11 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
           renderGraph={(g) => (
             <Suspense fallback={<div className="grid h-full place-items-center text-sm text-stone-500">Loading graph…</div>}>
               <MapGraph {...g} />
+            </Suspense>
+          )}
+          renderChangeGraph={(g) => (
+            <Suspense fallback={<div className="grid h-full place-items-center text-sm text-stone-500">Loading graph…</div>}>
+              <ChangeGraph {...g} />
             </Suspense>
           )}
         />
