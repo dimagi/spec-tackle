@@ -35,7 +35,7 @@ def _wait(client, head="abc1234"):
 
 def test_nothing_generated_yet(claude_app):
     assert claude_app.get(LOGIC, params={"head": "abc1234"}).json() == {
-        "available": True, "map": None, "stale": False, "running": False,
+        "available": True, "map": None, "stale": False, "running": False, "error": None,
     }
 
 
@@ -137,3 +137,15 @@ def test_signed_out_says_so(claude_app):
     for response in (claude_app.get(LOGIC, params={"head": "x"}), claude_app.post(LOGIC)):
         assert response.status_code == 401
         assert response.json()["signedOut"] is True
+
+
+def test_a_failure_nobody_watched_is_reported_until_the_next_run(claude_app):
+    claude_app.fake_ask.answers = [BAD, BAD]
+    claude_app.post(LOGIC)
+    state = _wait(claude_app)  # nobody subscribed to the events
+    assert state["error"].startswith("Claude's map didn't pass validation:")
+
+    claude_app.fake_ask.answers = [GOOD]
+    claude_app.post(LOGIC)
+    assert claude_app.get(LOGIC, params={"head": "abc1234"}).json()["error"] is None
+    assert _wait(claude_app)["error"] is None

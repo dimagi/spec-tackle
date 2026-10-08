@@ -194,3 +194,12 @@ def test_prompts_mention_the_limits():
     assert "3 levels" in logic.LOGIC_SYSTEM_PROMPT and "12" in logic.LOGIC_SYSTEM_PROMPT
     assert "```json" in logic.LOGIC_REQUEST
     json.loads(json.dumps(good_map()))  # the fixture itself is valid JSON
+
+
+def test_function_source_line_numbers_survive_leading_blank_lines(tmp_path):
+    root = tmp_path / "wt"
+    root.mkdir()
+    (root / "a.py").write_text("\n\nimport os\nx = 1\n")
+    out = logic.function_source(root, {"path": "a.py", "symbol": "x", "start": 3, "end": 4}, changed=set())
+    assert [(l["n"], l["html"].count("import")) for l in out["lines"]] == [(3, 1), (4, 0)]
+    assert "x" in out["lines"][1]["html"]

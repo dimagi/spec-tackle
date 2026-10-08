@@ -14,6 +14,10 @@ from .github import GitHubError, PRRef
 
 router = APIRouter()
 
+# The last failure per run key, so a run that failed with nobody watching still says so.
+# In memory only: a restart forgets it, like the run itself.
+_last_errors: dict[str, str] = {}
+
 
 def _key(*, login: str, pr: PRRef, sha: str) -> str:
     return f"logic:{login}:{pr.owner}/{pr.repo}#{pr.number}@{sha}"
@@ -27,11 +31,14 @@ def _public(m: dict | None) -> dict | None:
 
 def _state(*, state, login: str, pr: PRRef, head: str) -> dict:
     latest = state.store.latest_logic_map(login=login, pr=pr)
+    key = _key(login=login, pr=pr, sha=head)
+    running = bool(head) and state.turns.running(key)
     return {
         "available": True,
         "map": _public(latest),
         "stale": bool(latest and head and latest["headSha"] != head),
-        "running": bool(head) and state.turns.running(_key(login=login, pr=pr, sha=head)),
+        "running": running,
+        "error": None if running else _last_errors.get(key),
     }
 
 
@@ -69,6 +76,12 @@ def _check(text: str, cwd) -> tuple[dict | None, list[str]]:
 
 async def run_logic(*, state, client, token: str, login: str, pr: PRRef, overview: dict, emit) -> None:
     sha = overview["headRefOid"]
+    key = _key(login=login, pr=pr, sha=sha)
+
+    def fail(message: str) -> None:
+        _last_errors[key] = message
+        emit({"type": "error", "text": message})
+
     try:
         if not state.checkouts.has_clone(owner=pr.owner, repo=pr.repo):
             emit({"type": "tool", "text": f"Cloning {pr.owner}/{pr.repo}…"})
@@ -107,7 +120,7 @@ async def run_logic(*, state, client, token: str, login: str, pr: PRRef, overvie
             result, problems = _check(text, cwd)
         if problems:
             shown = "; ".join(problems[:5]) + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else "")
-            emit({"type": "error", "text": f"Claude's map didn't pass validation: {shown}"})
+            fail(f"Claude's map didn't pass validation: {shown}")
             return
         map_id = state.store.save_logic_map(
             login=login, pr=pr, head_sha=sha, summary=result["summary"],
@@ -115,13 +128,13 @@ async def run_logic(*, state, client, token: str, login: str, pr: PRRef, overvie
         )
         emit({"type": "done", "mapId": map_id})
     except CommitGone as exc:
-        emit({"type": "error", "text": str(exc)})
+        fail(str(exc))
     except CheckoutError as exc:
-        emit({"type": "error", "text": f"Couldn't fetch the repository: {exc}"})
+        fail(f"Couldn't fetch the repository: {exc}")
     except GitHubError as exc:
-        emit({"type": "error", "text": f"Couldn't read the PR from GitHub: {exc}"})
+        fail(f"Couldn't read the PR from GitHub: {exc}")
     except Exception as exc:  # noqa: BLE001 — any SDK failure is shown in the view
-        emit({"type": "error", "text": claude.describe_error(exc)})
+        fail(claude.describe_error(exc))
 
 
 # -- routes ------------------------------------------------------------------
@@ -131,7 +144,7 @@ async def run_logic(*, state, client, token: str, login: str, pr: PRRef, overvie
 async def logic_state(request: Request, owner: str, repo: str, number: int, head: str = ""):
     state = request.app.state
     if not state.claude_cli or state.store is None:
-        return {"available": False, "map": None, "stale": False, "running": False}
+        return {"available": False, "map": None, "stale": False, "running": False, "error": None}
     state, _, login = await _signed_in(request)
     return _state(state=state, login=login, pr=PRRef(owner, repo, number), head=head)
 
@@ -144,6 +157,7 @@ async def generate(request: Request, owner: str, repo: str, number: int):
     sha = overview["headRefOid"]
     key = _key(login=login, pr=pr, sha=sha)
     if not state.turns.running(key):
+        _last_errors.pop(key, None)
         token = await state.session.token()
         state.turns.start(
             thread_id=key,
