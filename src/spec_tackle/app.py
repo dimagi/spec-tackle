@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import mimetypes
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from . import claude, claude_api, render
+from . import claude, claude_api, pages, render
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
 from .github import GitHub, GitHubError, PRRef, parse_pr_url
@@ -24,7 +22,7 @@ from .store import Store, StoreError
 from .turns import TurnRunner
 
 HERE = Path(__file__).parent
-templates = Jinja2Templates(directory=HERE / "templates")
+SPA_SHELL = HERE / "static" / "dist" / "index.html"
 
 
 @asynccontextmanager
@@ -93,12 +91,7 @@ async def github_error(request: Request, exc: GitHubError):
         # GitHub rejected the token (revoked or expired): sign out so the page offers sign-in.
         await session(request).drop()
         exc = NotSignedIn("GitHub no longer accepts your sign-in. Please sign in again.")
-    if request.url.path.startswith(("/api/", "/auth/")):
-        return JSONResponse({"error": str(exc), "signedOut": signed_out}, status_code=exc.status)
-    return await index_page(
-        request, error=None if signed_out else str(exc), notice=str(exc) if signed_out else None,
-        next_url=request.url.path, status_code=exc.status,
-    )
+    return JSONResponse({"error": str(exc), "signedOut": signed_out}, status_code=exc.status)
 
 
 def session(request: Request) -> Session:
@@ -109,94 +102,28 @@ async def gh(request: Request) -> GitHub:
     return await session(request).client()
 
 
-async def index_page(request: Request, *, status_code: int = 200, **context) -> HTMLResponse:
-    viewer = await session(request).viewer()
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {"viewer": viewer, "gh_cli": LoginFlow.available(), **context},
-        status_code=status_code,
-    )
-
-
 # -- pages -----------------------------------------------------------------
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request, url: str | None = None, next: str | None = None):
+def spa_shell() -> FileResponse:
+    """The React app's entry page; it routes on the client and fetches its data from /api."""
+    return FileResponse(SPA_SHELL, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/")
+async def index(url: str | None = None):
     if url:
         try:
             pr = parse_pr_url(url)
         except ValueError as exc:
-            return await index_page(request, error=str(exc), url=url, status_code=400)
+            return RedirectResponse(f"/?{urlencode({'error': str(exc), 'url': url})}", status_code=303)
         return RedirectResponse(f"/pr/{pr.path}", status_code=303)
-    # Only ever send people back to a page on this app.
-    next_url = next if next and next.startswith("/") and not next.startswith("//") else None
-    return await index_page(request, next_url=next_url)
+    return spa_shell()
 
 
-@app.get("/pr/{owner}/{repo}/{number}", response_class=HTMLResponse)
-async def review_page(request: Request, owner: str, repo: str, number: int):
-    pr = PRRef(owner, repo, number)
-    client = await gh(request)
-    overview, files = await asyncio.gather(client.overview(pr), client.files(pr))
-    head = overview["headRefOid"]
-
-    async def build(file: dict) -> dict:
-        path = file["filename"]
-        hunks, added = render.parse_patch(file.get("patch"))
-        entry = {
-            "path": path,
-            "status": file["status"],
-            "additions": file["additions"],
-            "deletions": file["deletions"],
-            "hunks": hunks,
-            "wholeFile": file["status"] == "added",
-            "markdown": render.is_markdown(path),
-            "rendered": None,
-            "diff": render.render_diff(file["patch"], path) if file.get("patch") else None,
-            "outline": [],
-            "githubUrl": f"{overview['url']}/files",
-        }
-        if entry["markdown"] and file["status"] != "removed":
-            text = (await client.raw_file(owner, repo, path, head)).decode("utf-8", "replace")
-            html = render.render_markdown(
-                text,
-                path=path,
-                raw_base=f"/raw/{owner}/{repo}/{head}",
-                blob_base=f"https://github.com/{owner}/{repo}/blob/{head}",
-                # In a brand-new file every line is "added"; highlighting it all is noise.
-                added_lines=set() if entry["wholeFile"] else added,
-            )
-            entry["rendered"] = html
-            entry["outline"] = render.outline(html)
-        return entry
-
-    built = await asyncio.gather(*(build(f) for f in files))
-    # Specs first: rendered markdown is what reviewers came for.
-    built.sort(key=lambda f: (not f["rendered"], f["path"]))
-
-    activity = render.normalize_activity(overview)
-    client_files = {
-        f["path"]: {"hunks": f["hunks"], "wholeFile": f["wholeFile"], "markdown": f["markdown"]}
-        for f in built
-    }
-    return templates.TemplateResponse(
-        request,
-        "review.html",
-        {
-            "pr": pr,
-            "viewer": await session(request).viewer(),
-            "overview": overview,
-            "files": built,
-            "boot": {
-                "pr": {"owner": owner, "repo": repo, "number": number, "url": overview["url"]},
-                "files": client_files,
-                "activity": activity,
-                "claude": bool(request.app.state.claude_cli),
-            },
-        },
-    )
+@app.get("/pr/{owner}/{repo}/{number}")
+async def review_page(owner: str, repo: str, number: int):
+    return spa_shell()
 
 
 @app.get("/raw/{owner}/{repo}/{ref}/{path:path}")
@@ -255,6 +182,26 @@ async def activity(request: Request, owner: str, repo: str, number: int):
     client = await gh(request)
     data = await client.activity(PRRef(owner, repo, number))
     return render.normalize_activity(data)
+
+
+@app.get("/api/session")
+async def session_info(request: Request):
+    return {
+        "viewer": await session(request).viewer(),
+        "ghCli": LoginFlow.available(),
+        "claude": bool(request.app.state.claude_cli),
+    }
+
+
+@app.get("/api/pr/{owner}/{repo}/{number}/page")
+async def page_data(request: Request, owner: str, repo: str, number: int):
+    page = await pages.build_page(await gh(request), PRRef(owner, repo, number))
+    return {
+        **page,
+        "overview": pages.public_overview(page["overview"]),
+        "viewer": await session(request).viewer(),
+        "claude": bool(request.app.state.claude_cli),
+    }
 
 
 @app.post("/api/pr/{owner}/{repo}/{number}/comments")

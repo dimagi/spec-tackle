@@ -2,3 +2,7 @@
 __pycache__/
 .playwright-mcp/
 docs/superpowers/
+.superpowers/
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
