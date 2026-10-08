@@ -33,3 +33,16 @@ test("closing the composer clears an active composer", () => {
   expect(store.getState().composer).toBeNull();
   expect(store.getState().active).toBeNull();
 });
+
+test("opening a file from the Map switches to Review and asks for its changes", () => {
+  const store = createReviewStore(pr);
+  store.getState().setTab("map");
+  expect(store.getState().tab).toBe("map");
+
+  store.getState().openFileChanges("a.py");
+
+  expect(store.getState().tab).toBe("review");
+  expect(store.getState().fileRequest).toEqual({ path: "a.py", seq: 1 });
+  store.getState().openFileChanges("a.py");
+  expect(store.getState().fileRequest!.seq).toBe(2);
+});

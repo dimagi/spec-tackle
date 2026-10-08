@@ -4,3 +4,6 @@ import "@testing-library/jest-dom/vitest";
 if (!Range.prototype.getBoundingClientRect) {
   Range.prototype.getBoundingClientRect = () => new DOMRect();
 }
+
+// jsdom doesn't scroll.
+Element.prototype.scrollIntoView ??= function () {};

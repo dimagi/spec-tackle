@@ -5,7 +5,14 @@ import { loadPref, savePref, type PRRef } from "./storage";
 export type ComposerMode = "comment" | "claude";
 export type ComposerTarget = { path: string; start: number; end: number; quote: string | null; mode: ComposerMode };
 
+export type PageTabId = "review" | "map";
+
 export type ReviewState = {
+  tab: PageTabId;
+  /** A file the Map asked to show in Changes; seq changes on every request. */
+  fileRequest: { path: string; seq: number } | null;
+  setTab: (tab: PageTabId) => void;
+  openFileChanges: (path: string) => void;
   filter: "open" | "all";
   hideBots: boolean;
   showClaude: boolean;
@@ -30,6 +37,10 @@ export type ReviewState = {
 
 export function createReviewStore(pr: PRRef): StoreApi<ReviewState> {
   return createStore<ReviewState>((set, get) => ({
+    tab: "review",
+    fileRequest: null,
+    setTab: (tab) => set({ tab }),
+    openFileChanges: (path) => set({ tab: "review", fileRequest: { path, seq: (get().fileRequest?.seq ?? 0) + 1 } }),
     filter: loadPref(pr, "filter", "open"),
     hideBots: loadPref(pr, "hideBots", false),
     showClaude: loadPref(pr, "showClaude", true),

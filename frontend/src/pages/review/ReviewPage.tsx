@@ -22,6 +22,8 @@ import { useKeyboard } from "./hooks/useKeyboard";
 import type { MarginEngine } from "./hooks/useMarginEngine";
 import { useMermaid } from "./hooks/useMermaid";
 import { Margin } from "./Margin";
+import { MapView } from "../map/MapView";
+import { PageTabs } from "./PageTabs";
 import { GutterButton } from "./GutterButton";
 import { Rail } from "./Rail";
 import { ReplyBox } from "./ReplyBox";
@@ -256,6 +258,15 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   };
 
   const [reviewOpen, setReviewOpen] = useState(false);
+  const tab = useReview((s) => s.tab);
+  const fileRequest = useReview((s) => s.fileRequest);
+
+  // The Map asked for a file: once Review is showing, bring that file into view.
+  useEffect(() => {
+    if (!fileRequest) return;
+    requestAnimationFrame(() =>
+      document.querySelector(`section.file[data-path="${CSS.escape(fileRequest.path)}"]`)?.scrollIntoView({ block: "start" }));
+  }, [fileRequest]);
 
   const postConversation = async (body: string) => {
     try {
@@ -293,15 +304,17 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     else toast("No open threads 🎉");
   };
 
+  const onReview = tab === "review";
   useKeyboard({
-    step,
+    step: (direction) => { if (onReview) step(direction); },
     escape: () => {
+      if (!onReview) return;
       if (store.getState().composer && !composerDirty.current) closeComposer();
       activate(null);
     },
-    comment: commentOnSelection,
+    comment: (mode) => onReview && commentOnSelection(mode),
     reply: () => {
-      if (!active) return;
+      if (!active || !onReview) return;
       document.querySelector<HTMLTextAreaElement>(`[data-card="${CSS.escape(active)}"] .thread-reply textarea`)?.focus();
     },
   });
@@ -342,8 +355,13 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         newCommits={activity.headSha !== renderedSha}
         onRefresh={() => live.refresh()}
         onFinishReview={() => setReviewOpen(true)}
+        tabs={<PageTabs tabs={[{ id: "review", label: "Review" }, { id: "map", label: "Map" }]} active={tab}
+          onSelect={(id) => store.getState().setTab(id as "review" | "map")} />}
       />
-      <div className="flex">
+      {tab === "map" && (
+        <MapView page={page} pr={pr} head={activity.headSha} onOpenFile={(path) => store.getState().openFileChanges(path)} />
+      )}
+      <div className="flex" hidden={tab !== "review"}>
         <Rail files={page.files} claude={page.claude} stats={stats} headingCounts={counts}
           conversationCount={conversationCount} onStep={step} />
         <div className="min-w-0 flex-1 px-4 py-8 lg:px-8">
@@ -355,7 +373,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
               })} />
               <Description overview={page.overview} />
               {page.files.map((file, i) => (
-                <FileSection key={file.path} file={file} index={i + 1} onViewChange={() => setViewVersion((v) => v + 1)} />
+                <FileSection key={file.path} file={file} index={i + 1} onViewChange={() => setViewVersion((v) => v + 1)}
+                  showChanges={fileRequest?.path === file.path ? fileRequest.seq : undefined} />
               ))}
               <Conversation items={activity.conversation} fresh={seenState.fresh} hideBots={hideBots} onPost={postConversation} />
             </main>
@@ -382,7 +401,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         </div>
       </div>
       <FinishReview open={reviewOpen} onClose={() => setReviewOpen(false)} onSubmit={submitReview} />
-      <SelectionButton selection={selection} claude={page.claude} onComment={() => commentOnSelection("comment")} />
+      <SelectionButton selection={onReview ? selection : null} claude={page.claude} onComment={() => commentOnSelection("comment")} />
     </ReviewPageCtx.Provider>
   );
 }

@@ -373,3 +373,33 @@ kbd { font: 500 10px "JetBrains Mono", monospace; padding: 0 4px; border-radius:
 html.dark .claude-error { color: #fca5a5; }
 .spinner { display: inline-block; width: 10px; height: 10px; border-radius: 999px; border: 2px solid var(--claude); border-right-color: transparent; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Map tab ─────────────────────────────────────────── */
+.map-view { max-width: 1600px; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
+.map-toolbar { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
+.map-notice { border-radius: 10px; padding: .55rem .8rem; font-size: 13px; background: rgba(56,189,248,.10); color: var(--ink); display: flex; align-items: center; }
+.map-notice.warn { background: rgba(245,158,11,.12); }
+.map-notice.error { background: rgba(244,63,94,.10); color: #9f1239; }
+html.dark .map-notice.error { color: #fda4af; }
+.map-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 1.25rem; align-items: start; }
+.map-grid.single { grid-template-columns: minmax(0, 46rem); }
+.map-graph { height: calc(100vh - 11rem); min-height: 420px; border: 1px solid var(--paper-border); border-radius: 14px; background: var(--paper); overflow: hidden; position: sticky; top: 4.5rem; }
+.map-path { background: var(--paper); border: 1px solid var(--paper-border); border-radius: 14px; padding: .9rem 1rem 1.2rem; }
+.map-progress { font-size: 12px; color: var(--muted); margin-bottom: .4rem; }
+.map-progress i { display: block; height: 5px; border-radius: 3px; background: rgba(120,113,108,.15); margin-top: 5px; overflow: hidden; }
+.map-progress b { display: block; height: 100%; background: #d97706; }
+.map-phase { margin: .9rem 0 .25rem; font: 600 10.5px/1 Inter, sans-serif; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.map-row { display: flex; align-items: center; gap: .45rem; padding: .25rem .4rem; border-radius: 7px; cursor: pointer; }
+.map-row:hover, .map-row.hl { background: var(--hl); }
+.map-row.sel { background: var(--hl-strong); }
+.map-row.dependent { opacity: .75; }
+.map-row button:hover { text-decoration: underline; }
+.map-bar { width: 54px; height: 6px; border-radius: 3px; background: rgba(120,113,108,.15); position: relative; flex-shrink: 0; }
+.map-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: #d97706; }
+.map-tag { font: 600 10px/1 Inter, sans-serif; border-radius: 5px; padding: 3px 5px; background: rgba(120,113,108,.12); color: var(--muted); flex-shrink: 0; }
+.map-tag.contract { background: #fde2c4; color: #9a3412; }
+.map-tag.new { background: #d1fae5; color: #065f46; }
+.map-tag.test { background: #dbeafe; color: #1e40af; }
+.map-tag.check { background: transparent; border: 1px dashed currentColor; }
+.map-note { margin: 0 0 .2rem 3.1rem; font: italic 12px/1.35 Inter, sans-serif; color: var(--muted); }
+.map-plain { margin-top: 1rem; display: grid; gap: .3rem; }

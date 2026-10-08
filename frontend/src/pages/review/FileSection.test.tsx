@@ -34,3 +34,9 @@ test("a binary file links to GitHub", () => {
   expect(screen.getByText(/No preview available/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "View on GitHub" })).toBeInTheDocument();
 });
+
+test("a request from the Map shows the changes", () => {
+  const { container, rerender } = render(<FileSection file={makeFile()} index={1} />);
+  rerender(<FileSection file={makeFile()} index={1} showChanges={1} />);
+  expect(container.querySelector('.view[data-view="diff"]')).toBeVisible();
+});

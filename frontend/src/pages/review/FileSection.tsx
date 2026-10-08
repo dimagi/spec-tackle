@@ -1,13 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PageFile } from "../../api/types";
 import { Html } from "../../components/Html";
 
 export type FileView = "rendered" | "diff";
 
-type Props = { file: PageFile; index: number; onViewChange?: (path: string, view: FileView) => void };
+type Props = {
+  file: PageFile;
+  index: number;
+  onViewChange?: (path: string, view: FileView) => void;
+  /** Changes whenever something (the Map) asks to show this file's diff. */
+  showChanges?: number;
+};
 
-export function FileSection({ file, index, onViewChange }: Props) {
+export function FileSection({ file, index, onViewChange, showChanges }: Props) {
   const [view, setView] = useState<FileView>(file.rendered ? "rendered" : "diff");
+  useEffect(() => {
+    if (showChanges && file.diff) {
+      setView("diff");
+      onViewChange?.(file.path, "diff");
+    }
+    // Only a new request switches the view.
+  }, [showChanges]);
   const toggle = !!(file.rendered && file.diff && !file.wholeFile);
   const pick = (v: FileView) => {
     setView(v);
