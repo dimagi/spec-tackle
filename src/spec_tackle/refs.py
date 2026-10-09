@@ -8,6 +8,7 @@ in another file of the repository, with the lines they point at.
 from __future__ import annotations
 
 import difflib
+import posixpath
 import re
 from pathlib import Path
 
@@ -69,7 +70,8 @@ REFS_REQUEST = (
 
 # Markdown syntax a reader doesn't see: link targets, then emphasis, code and brackets.
 _LINK_TARGET = re.compile(r"\]\([^)]*\)")
-_MARKUP = re.compile(r"[*_`~\[\]]")
+# `_` is emphasis only at a word's edge; inside a word (MAX_RETRIES) it is shown.
+_MARKUP = re.compile(r"[*`~\[\]]|(?<!\w)_|_(?!\w)")
 _SPACE = re.compile(r"\s+")
 
 
@@ -93,10 +95,15 @@ def repair_request(problems: list[str]) -> str:
     )
 
 
-def _plain(text: str) -> str:
-    """What a reader sees of some markdown, for comparing phrases: no markup, one case, single spaces."""
+def _shown(text: str) -> str:
+    """What a reader sees of some markdown: no markup, single spaces."""
     text = _MARKUP.sub("", _LINK_TARGET.sub("", text))
-    return _SPACE.sub(" ", text).strip().casefold()
+    return _SPACE.sub(" ", text).strip()
+
+
+def _plain(text: str) -> str:
+    """What a reader sees of some markdown, in one case, for comparing phrases."""
+    return _shown(text).casefold()
 
 
 def parse(text: str) -> tuple[list | None, list[str]]:
@@ -135,6 +142,8 @@ def validate(refs: list, lines: list[str], *, path: str, root: Path) -> list[dic
             continue
         if not 1 <= line <= len(lines):
             continue
+        if isinstance(target, str) and target:
+            target = posixpath.normpath(target)  # ./spec.md, docs/../spec.md
         if target in (None, "", path):
             target = None
             if not 1 <= start <= end <= len(lines) or start <= line <= end:
@@ -142,7 +151,6 @@ def validate(refs: list, lines: list[str], *, path: str, root: Path) -> list[dic
         else:
             if not isinstance(target, str):
                 continue
-            target = target.removeprefix("./")
             count = size(target)
             if count is None or not 1 <= start <= end <= count:
                 continue
@@ -158,7 +166,7 @@ def validate(refs: list, lines: list[str], *, path: str, root: Path) -> list[dic
         seen.add(key)
         note = note.strip()[:MAX_NOTE] if isinstance(note, str) else ""
         kept.append({
-            "line": line, "text": text.strip(), "targetPath": target,
+            "line": line, "text": _shown(text), "targetPath": target,
             "targetStart": start, "targetEnd": end, "note": note,
         })
         if len(kept) == MAX_REFS:
@@ -216,8 +224,9 @@ def carry(
         if "changed" in ref:
             moved["changed"] = sorted(target[n] for n in ref["changed"] if n in target)
         kept.append(moved)
-    unmapped = set(range(1, len(new[path] or []) + 1)) - set(doc.values())
-    pending = sorted(unmapped | recheck)
+    # Blank lines hold no phrases, so they never need checking.
+    written = {n for n, text in enumerate(new[path] or [], start=1) if text.strip()}
+    pending = sorted((written - set(doc.values())) | recheck)
     return kept, pending, outdated
 
 

@@ -110,3 +110,28 @@ def test_line_map_follows_unchanged_lines():
 
 def test_partial_request_lists_lines_as_ranges():
     assert "1–3, 7, 9–10." in refs.partial_request([1, 2, 3, 7, 9, 10])
+
+
+def test_markup_is_left_out_of_the_stored_phrase(tmp_path):
+    lines = ["Retry up to `MAX_RETRIES` times, per the [retry policy](retry.md).", "", "MAX_RETRIES = 3"]
+
+    def kept(text):
+        found = refs.validate([ref(line=1, text=text, targetStart=3, targetEnd=3)], lines, path="d.md", root=tmp_path)
+        return [r["text"] for r in found]
+
+    assert kept("`MAX_RETRIES`") == ["MAX_RETRIES"]
+    assert kept("[retry policy](retry.md)") == ["retry policy"]
+    # An underscore inside a word is shown, so a phrase without it isn't on the line.
+    assert kept("MAXRETRIES") == []
+
+
+def test_a_path_that_names_this_document_another_way_is_a_same_file_ref(root):
+    assert check([ref(targetPath="./docs/spec.md")], root)[0]["targetPath"] is None
+    assert check([ref(targetPath="docs/../docs/spec.md")], root)[0]["targetPath"] is None
+
+
+def test_blank_lines_added_by_a_commit_need_no_check():
+    old = ["# Spec", "Text."]
+    new = ["# Spec", "", "Text.", "", "New text."]
+    _, pending, _ = refs.carry([], path="d.md", old={"d.md": old}, new={"d.md": new})
+    assert pending == [5]
