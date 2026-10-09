@@ -51,3 +51,19 @@ test("Description and Conversation stay outside the tree", () => {
   expect(screen.getByRole("link", { name: "Description" })).toHaveAttribute("href", "#description");
   expect(screen.getByRole("link", { name: /Conversation/ })).toHaveAttribute("href", "#conversation");
 });
+
+test("Collapse all folds every folder, then offers Expand all", async () => {
+  renderRail([makeFile({ path: "docs/specs/a.md" }), makeFile({ path: "src/app.py" }), makeFile({ path: "README.md" })]);
+  await userEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+  expect(entries()).toEqual(["•README.md"]);
+  expect(within(tree()).getAllByRole("treeitem", { expanded: false })).toHaveLength(2);
+
+  await userEvent.click(screen.getByRole("button", { name: "Expand all" }));
+  expect(entries()).toEqual(["•a.md", "•app.py", "•README.md"]);
+  expect(screen.getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
+});
+
+test("no Collapse all when there are no folders", () => {
+  renderRail([makeFile({ path: "README.md" })]);
+  expect(screen.queryByRole("button", { name: "Collapse all" })).toBeNull();
+});

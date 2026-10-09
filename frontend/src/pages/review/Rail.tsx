@@ -20,6 +20,8 @@ export function Rail({ files, views, claude, stats, headingCounts, conversationC
   const { filter, hideBots, showClaude, setFilter, setHideBots, setShowClaude } = useReview((s) => s);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const tree = useMemo(() => fileTree(files), [files]);
+  const folders = useMemo(() => folderPaths(tree), [tree]);
+  const allCollapsed = folders.length > 0 && folders.every((p) => collapsed.has(p));
   const sections = (file: PageFile) => (views[file.path] === "rendered" ? file.outline : []);
   const targets = [
     "description",
@@ -106,7 +108,14 @@ export function Rail({ files, views, claude, stats, headingCounts, conversationC
       </section>
 
       <section className="mb-6">
-        <h2 className="rail-heading">Contents</h2>
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="rail-heading">Contents</h2>
+          {folders.length > 0 && (
+            <button type="button" className="rail-action" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(folders))}>
+              {allCollapsed ? "Expand all" : "Collapse all"}
+            </button>
+          )}
+        </div>
         <nav className="space-y-0.5">
           <a href="#description" className={link("description", "")}><span className="truncate">Description</span></a>
           <div role="tree" aria-label="Changed files" className="mt-2 space-y-0.5">
@@ -126,6 +135,11 @@ export function Rail({ files, views, claude, stats, headingCounts, conversationC
       </section>
     </aside>
   );
+}
+
+/** Every folder in the tree, at any depth. */
+function folderPaths(nodes: TreeNode[]): string[] {
+  return nodes.flatMap((n) => (n.kind === "dir" ? [n.path, ...folderPaths(n.children)] : []));
 }
 
 /** Width of a folder's chevron plus the gap after it, in rem. */

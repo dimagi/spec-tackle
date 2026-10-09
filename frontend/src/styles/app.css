@@ -299,6 +299,8 @@ kbd { font: 500 10px "JetBrains Mono", monospace; padding: 0 4px; border-radius:
 
 /* ── Left rail ───────────────────────────────────────── */
 .rail-heading { margin-bottom: .5rem; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.rail-action { font-size: 11px; color: var(--muted); border-radius: .25rem; padding: 0 .25rem; }
+.rail-action:hover { color: var(--ink); background: rgba(120, 113, 108, .12); }
 .stat { border-radius: 10px; padding: 8px 10px; background: var(--paper); border: 1px solid var(--paper-border); }
 .stat-num { font-size: 20px; font-weight: 700; line-height: 1.1; }
 .stat-label { font-size: 11px; color: var(--muted); }
