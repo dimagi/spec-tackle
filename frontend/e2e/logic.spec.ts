@@ -12,7 +12,7 @@ test("generate a logic map, expand it, open a function and jump to it in Review"
   await page.getByRole("button", { name: "Generate logic map" }).click();
   await expect(page.getByText("Failed form submissions are retried with backoff")).toBeVisible();
 
-  const chart = page.locator(".logic-chart");
+  const chart = page.locator(".logic-flow");
   // A plain click on a block with steps inside shows all their code.
   await chart.getByRole("button", { name: /Retry failures ⊕/ }).click();
   const parent = page.getByRole("complementary", { name: "Retry failures" });

@@ -2,28 +2,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { LogicBlock, LogicFunctions, LogicMap, LogicState } from "../../api/types";
+import { layoutFlow } from "../../lib/logicFlow";
 import { loadPref } from "../../state/storage";
+import { stubReactFlowEnvironment } from "../../test/reactFlow";
 import { LogicView } from "./LogicView";
 
-const mermaid = vi.hoisted(() => {
-  /** A stand-in for Mermaid: one <g> per node or subgraph line, labelled with its text. */
-  const fakeSvg = (source: string) => {
-    const parts = source.split("\n").flatMap((line) => {
-      const sub = /^\s*subgraph (c\d+)\["(.*)"\]$/.exec(line);
-      if (sub) return [`<g class="cluster" id="${sub[1]}"><g class="cluster-label"><text>${sub[2]}</text></g></g>`];
-      const node = /^\s*(n\d+)\W+"(.*)"\W+$/.exec(line);
-      if (node) return [`<g class="node" id="flowchart-${node[1]}-7"><text>${node[2]}</text></g>`];
-      return [];
-    });
-    return `<svg>${parts.join("")}</svg>`;
-  };
-  return {
-    fakeSvg,
-    initialize: vi.fn(),
-    render: vi.fn(async (_id: string, source: string) => ({ svg: fakeSvg(source) })),
-  };
+// The real layout runs (ELK); one test makes it fail to check the list fallback.
+vi.mock("../../lib/logicFlow", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../lib/logicFlow")>();
+  return { ...real, layoutFlow: vi.fn(real.layoutFlow) };
 });
-vi.mock("mermaid", () => ({ default: { initialize: mermaid.initialize, render: mermaid.render } }));
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -47,7 +35,11 @@ const BLOCKS: LogicBlock[] = [
     leaf("sync", "Queue a sync", { kind: "async", functions: [{ path: "lib/queue.py", symbol: "push", start: 1, end: 1 }] }),
   ] },
 ];
-const MAP: LogicMap = { id: "m1", headSha: HEAD, summary: "Retries failed submissions.", blocks: BLOCKS, createdAt: "2026-10-08T09:00:00Z" };
+const TEST_BLOCK: LogicBlock = {
+  id: "spec", label: "Test: retries are tried five times", kind: "step", change: "added", next: [],
+  functions: [{ path: "tests/test_retry.py", symbol: "test_five_tries", start: 1, end: 9 }],
+};
+const MAP: LogicMap = { id: "m1", headSha: HEAD, summary: "Retries failed submissions.", blocks: [...BLOCKS, TEST_BLOCK], createdAt: "2026-10-08T09:00:00Z" };
 const STORE_FNS: LogicFunctions = {
   label: "Store the visit", headSha: HEAD,
   functions: [{ path: "app/visits.py", symbol: "save", start: 2, end: 3, inDiff: true, step: "Store the visit", lines: [
@@ -109,7 +101,7 @@ beforeEach(() => {
   localStorage.clear();
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
-  mermaid.render.mockImplementation(async (_id: string, source: string) => ({ svg: mermaid.fakeSvg(source) }));
+  stubReactFlowEnvironment();
   routes = {
     [`GET ${LOGIC}?head=${HEAD}`]: state({ map: MAP }),
     "GET /api/logic/m1/blocks/store/functions": STORE_FNS,
@@ -269,14 +261,20 @@ test("blocks are keyboard operable: Enter shows the code, Ctrl+Enter expands", a
   expect(await screen.findByRole("button", { name: /⊖ Save and sync/ })).toBeInTheDocument();
 });
 
-test("if Mermaid fails, the map is shown as a list that still works", async () => {
-  mermaid.render.mockRejectedValue(new Error("Parse error"));
+test("if the layout fails, the map is shown as a list that still works", async () => {
+  vi.mocked(layoutFlow).mockRejectedValueOnce(new Error("ELK failed"));
   setup();
   const list = await screen.findByRole("tree", { name: "Logic map" });
   expect(list).toBeVisible();
   await userEvent.click(within(list).getByRole("button", { name: "Expand Save and sync" }));
   await userEvent.click(await within(list).findByRole("button", { name: /Store the visit/ }));
   expect(await screen.findByRole("complementary", { name: "Store the visit" })).toBeInTheDocument();
+});
+
+test("the legend explains the red outline", async () => {
+  setup();
+  await node(/Form is submitted/);
+  expect(screen.getByText(/red outline: exit/)).toBeInTheDocument();
 });
 
 test("a run that failed while nobody watched shows its error", async () => {
@@ -300,11 +298,15 @@ test("a run started for a newer head is followed at that head, so the new map is
   expect(screen.queryByText(/Generated for/)).toBeNull();
 });
 
-test("Mermaid wraps labels wide enough for a subgraph title to stay on one line", async () => {
+test("test blocks are hidden until you ask for them, and the choice is kept", async () => {
   setup();
   await node(/Form is submitted/);
-  expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({
-    securityLevel: "strict",
-    flowchart: expect.objectContaining({ wrappingWidth: 360 }),
-  }));
+  expect(screen.queryByRole("button", { name: /Test: retries/ })).toBeNull();
+
+  const toggle = screen.getByRole("button", { name: "Show tests (1)" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await userEvent.click(toggle);
+  expect(await node(/Test: retries are tried five times/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Hide tests (1)" })).toHaveAttribute("aria-pressed", "true");
+  expect(loadPref(PR, "logicShowTests", false)).toBe(true);
 });
