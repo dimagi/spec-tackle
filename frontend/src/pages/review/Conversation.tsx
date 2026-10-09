@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ConversationItem } from "../../api/types";
+import { CommentMenu } from "../../components/CommentMenu";
 import { Html } from "../../components/Html";
 import { RelativeTime } from "../../components/RelativeTime";
 import { externalLinks } from "../../lib/links";
@@ -43,7 +44,7 @@ export function Conversation({ items, fresh, hideBots, onPost }: Props) {
                 {c.author.isBot && <span className="chip chip-bot">bot</span>}
                 <RelativeTime iso={c.createdAt} />
                 {fresh.has(c.id) && <span className="chip chip-new">new</span>}
-                <a className="ml-auto text-xs text-stone-400 hover:text-stone-700" href={c.url} target="_blank" rel="noopener">↗</a>
+                <CommentMenu url={c.url} className="ml-auto self-center" />
               </div>
               {c.bodyHTML && <Html html={c.bodyHTML} className="comment-body gh-body prose prose-stone prose-sm mt-1 max-w-none dark:prose-invert" />}
             </div>

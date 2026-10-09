@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Comment, Thread } from "../../api/types";
+import { CommentMenu } from "../../components/CommentMenu";
 import { RelativeTime } from "../../components/RelativeTime";
 import { externalLinks } from "../../lib/links";
 import { rangeLabel, threadRange } from "../../lib/threads";
@@ -44,6 +45,7 @@ function CommentView({ c, fresh, expanded, onExpand }: { c: Comment; fresh: bool
           {c.author.isBot && <span className="chip chip-bot">bot</span>}
           <RelativeTime iso={c.createdAt} />
           {fresh && <span className="chip chip-new">new</span>}
+          <CommentMenu url={c.url} className="ml-auto self-center" />
         </div>
         <div ref={body} className={`comment-body prose prose-stone prose-sm max-w-none dark:prose-invert ${clamped ? "clamped" : ""}`}
           dangerouslySetInnerHTML={{ __html: c.bodyHTML }} />
