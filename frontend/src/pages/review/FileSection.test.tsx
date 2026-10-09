@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { makeFile } from "../../test/fixtures";
-import { FileSection, viewForLine } from "./FileSection";
+import { FileSection, showsLine, viewForLine } from "./FileSection";
 
 test("a modified markdown file shows the changes, and can switch to the document", async () => {
   const onViewChange = vi.fn();
@@ -50,4 +50,11 @@ test("viewForLine picks Changes for a line in the diff, else the document; files
   expect(viewForLine(modified, 9)).toBe("rendered");
   expect(viewForLine(makeFile({ wholeFile: true, status: "added", hunks: [[1, 9]] }), 4)).toBe("rendered");
   expect(viewForLine(makeFile({ path: "a.py", markdown: false, rendered: null }), 4)).toBe("diff");
+});
+
+test("showsLine: a document shows every line, a code file's changes only their hunks", () => {
+  expect(showsLine(makeFile({ hunks: [[3, 5]] }), 9)).toBe(true);
+  const code = makeFile({ path: "a.py", markdown: false, rendered: null, hunks: [[3, 5]] });
+  expect(showsLine(code, 4)).toBe(true);
+  expect(showsLine(code, 9)).toBe(false);
 });

@@ -145,3 +145,19 @@ export type LogicFunction = FunctionRef & {
 };
 
 export type LogicFunctions = { label: string; headSha: string; functions: LogicFunction[] };
+
+/** A phrase in a document that points at other lines: of the same file when `targetPath` is null. */
+export type DocRef = {
+  line: number; text: string; targetPath: string | null; targetStart: number; targetEnd: number; note: string;
+};
+/** GET /api/refs/{id}/{index}/target: what a reference to another file points at. */
+export type RefTarget = {
+  path: string; start: number; end: number; truncated: boolean; inDiff: boolean; githubUrl: string;
+} & ({ kind: "markdown"; html: string } | { kind: "code"; lines: { n: number; html: string; changed: boolean }[] });
+export type DocRefs = {
+  id: string; path: string; headSha: string; refs: DocRef[]; createdAt: string;
+  /** Carried forward from an older commit: document lines still to check, and references dropped as outdated. */
+  pending: number[]; basedOn: string | null; outdated: number;
+};
+/** GET/POST …/refs for one file. */
+export type DocRefsState = { available: boolean; refs: DocRefs | null; stale: boolean; running: boolean; error?: string | null };

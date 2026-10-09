@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 import type { PRRef } from "../state/storage";
 import { request } from "./request";
-import type { Activity, ClaudeThread, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
+import type { Activity, ClaudeThread, DocRefsState, RefTarget, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
 
 export const POLL_MS = 30_000;
 
@@ -112,6 +112,27 @@ export function useLogicFunctions(mapId: string, blockId: string) {
   return useQuery({
     queryKey: ["logic-functions", mapId, blockId],
     queryFn: () => request<LogicFunctions>("GET", `/api/logic/${encodeURIComponent(mapId)}/blocks/${encodeURIComponent(blockId)}/functions`),
+    staleTime: Infinity,
+  });
+}
+
+export const docRefsKey = (pr: PRRef, path: string, head: string) => ["refs", pr.owner, pr.repo, pr.number, path, head];
+
+/** A file's cross-references, and whether they're being found for `head`. */
+export function useDocRefs(pr: PRRef, path: string, head: string) {
+  return useQuery({
+    queryKey: docRefsKey(pr, path, head),
+    queryFn: () => request<DocRefsState>(
+      "GET", `${apiBase(pr)}/refs?path=${encodeURIComponent(path)}&head=${encodeURIComponent(head)}`,
+    ),
+  });
+}
+
+/** What a reference to another file points at, read from the checkout on the server. */
+export function useRefTarget(refsId: string, index: number) {
+  return useQuery({
+    queryKey: ["ref-target", refsId, index],
+    queryFn: () => request<RefTarget>("GET", `/api/refs/${encodeURIComponent(refsId)}/${index}/target`),
     staleTime: Infinity,
   });
 }

@@ -18,6 +18,8 @@ type Props = {
   onRefresh: () => void;
   onFinishReview: () => void;
   tabs?: ReactNode;
+  /** Per-PR switches, such as finding references automatically. */
+  settings?: ReactNode;
   /** The PR title, as a switcher to other PRs. */
   switcher: ReactNode;
 };
@@ -29,7 +31,7 @@ function syncLabel(sync: SyncStatus) {
   return `Live · ${timeAgo(new Date(sync.lastSync).toISOString())}`;
 }
 
-export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRefresh, onFinishReview, tabs, switcher }: Props) {
+export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRefresh, onFinishReview, tabs, settings, switcher }: Props) {
   useTick();
   const label = activity.isDraft && activity.state === "OPEN" ? "DRAFT" : activity.state;
   const dot = sync.fetching ? "bg-amber-400 animate-pulse" : sync.error ? "bg-rose-500" : "bg-emerald-500";
@@ -49,6 +51,7 @@ export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRef
           {switcher}
         </div>
         {tabs}
+        {settings}
         {newCommits && (
           <div className="flex items-center gap-2 rounded-lg bg-sky-100 px-3 py-1.5 text-xs font-medium text-sky-900 dark:bg-sky-500/15 dark:text-sky-200">
             New commits pushed
