@@ -117,6 +117,7 @@ class FakeCheckouts:
         self.calls = []
         self.files: dict[str, dict[str, str]] = {}  # per commit: path -> text, over the defaults
         self.gone: set[str] = set()  # commits that were force-pushed away
+        self.offline = False  # fetching fails, e.g. no network
 
     def has_clone(self, *, owner, repo):
         return bool(self.calls)
@@ -125,6 +126,9 @@ class FakeCheckouts:
         from spec_tackle.checkout import CommitGone
         if sha in self.gone:
             raise CommitGone("gone")
+        if self.offline:
+            from spec_tackle.checkout import CheckoutError
+            raise CheckoutError("network down")
         self.calls.append(sha)
         path = self.root / sha
         (path / "docs").mkdir(parents=True, exist_ok=True)

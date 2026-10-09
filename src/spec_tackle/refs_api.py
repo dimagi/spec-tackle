@@ -50,10 +50,14 @@ def _slot() -> asyncio.Semaphore:
 
 async def _state(*, state, login: str, pr: PRRef, path: str, head: str) -> dict:
     latest = head and state.store.doc_refs_at(login=login, pr=pr, path=path, head_sha=head)
+    fetch_error = None
     if not latest:
         latest = state.store.latest_doc_refs(login=login, pr=pr, path=path)
         if latest and head:
-            latest = await _carried(state=state, login=login, pr=pr, path=path, head=head, old=latest) or latest
+            try:
+                latest = await _carried(state=state, login=login, pr=pr, path=path, head=head, old=latest) or latest
+            except CheckoutError as exc:  # e.g. offline: the carry is tried again on the next load
+                fetch_error = f"Couldn't fetch the repository: {exc}"
     key = _key(login=login, pr=pr, path=path, sha=head)
     running = bool(head) and state.turns.running(key)
     return {
@@ -61,7 +65,7 @@ async def _state(*, state, login: str, pr: PRRef, path: str, head: str) -> dict:
         "refs": latest,
         "stale": bool(latest and head and latest["headSha"] != head),
         "running": running,
-        "error": None if running else _last_errors.get(key),
+        "error": None if running else fetch_error or _last_errors.get(key),
     }
 
 
@@ -74,7 +78,7 @@ async def _carried(*, state, login: str, pr: PRRef, path: str, head: str, old: d
         token = await state.session.token()
         before = await state.checkouts.worktree(owner=pr.owner, repo=pr.repo, sha=old["headSha"], token=token)
         after = await state.checkouts.worktree(owner=pr.owner, repo=pr.repo, sha=head, token=token)
-    except CheckoutError:  # e.g. the old commit was force-pushed away: a full search is needed
+    except CommitGone:  # the old commit was force-pushed away: a full search is needed
         return None
     paths = {path} | {r["targetPath"] for r in old["refs"] if r["targetPath"]}
     old_lines = {p: _lines(before, p) for p in paths}

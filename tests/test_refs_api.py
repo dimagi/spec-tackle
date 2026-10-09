@@ -184,6 +184,17 @@ def test_refs_from_a_commit_that_is_gone_stay_stale(claude_app):
     assert state["stale"] is True and state["refs"]["headSha"] == "abc1234"
 
 
+def test_a_failed_fetch_is_an_error_and_the_carry_is_tried_again(claude_app):
+    _found_at_old_commit(claude_app)
+    claude_app.app.state.checkouts.offline = True
+    state = _get(claude_app, head="def5678")
+    assert state["error"] == "Couldn't fetch the repository: network down"
+    assert state["refs"]["headSha"] == "abc1234"
+    claude_app.app.state.checkouts.offline = False
+    state = _get(claude_app, head="def5678")
+    assert (state["error"], state["stale"], state["refs"]["headSha"]) == (None, False, "def5678")
+
+
 def test_an_unreadable_answer_gets_one_repair_turn(claude_app):
     claude_app.fake_ask.answers = ["Sorry, no JSON.", GOOD]
     claude_app.post(REFS, json={"path": PATH, "head": "abc1234"})
