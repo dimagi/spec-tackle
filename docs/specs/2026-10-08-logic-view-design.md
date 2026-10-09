@@ -21,9 +21,9 @@ sent to GitHub.
 | Scope | One map per PR, describing the whole change end to end. It is not per file. |
 | Where | A **Logic view** tab next to **Code view** in the top bar's page tabs, shown only when Ask Claude is available. |
 | Shape | A tree of blocks, at most 3 levels deep and at most 12 blocks per level. Each level is a flowchart with edges between siblings. |
-| Expanding | Clicking any block opens a side panel with its code: a leaf's functions, or for a block with steps inside, the functions of every step under it, each labelled with its step. Ctrl-click (⌘-click on Mac) expands or collapses a block with children in place as a subgraph. |
+| Expanding | Clicking any block opens a side panel with its code: a leaf's functions, or for a block with steps inside, the functions of every step under it, each labelled with its step. Ctrl-click (⌘-click on Mac) expands or collapses a block with children in place as a group box. |
 | Leaf code | Each function's full source from the checkout at the map's commit, with the PR's added or changed lines highlighted. |
-| Rendering | Mermaid `flowchart TD`, which is already a lazily loaded dependency, built from the tree on the client. |
+| Rendering | React Flow (`@xyflow/react`), laid out top-down by ELK (`elkjs`), which handles expanded blocks as nested groups. Both load lazily with the map. Mermaid stays in the project for diagrams in markdown, but isn't used here. A Mermaid version was built first and replaced after a prototype comparison (clipped group titles, no pan or zoom, and click handling patched onto generated SVG). |
 | How Claude is called | The same as Ask Claude: Agent SDK, read-only Read/Grep/Glob on the checkout, the same file guard, and no MCP servers. |
 | Output format | JSON in a fenced block, validated on the server. One repair turn is allowed on invalid output. |
 | When it's generated | On demand, from a **Generate** button. |
@@ -138,27 +138,25 @@ check the guard uses.
 
 ### Flowchart
 
-- `toMermaid(tree, expanded)` is a pure function that turns the tree and the set of expanded block ids into Mermaid source.
-- Node shape comes from `kind`:
-
-  | kind | Mermaid shape |
-  |---|---|
-  | entry | `([…])` stadium |
-  | step | `[…]` rectangle |
-  | decision | `{…}` diamond |
-  | loop | `{{…}}` hexagon, with a ↻ prefix |
-  | async | `[/…/]` parallelogram, with a ⚡ prefix |
-  | exit | `([…])` stadium, with the exit class (red border) |
-
-- The fill class comes from `change`: green for added, amber for changed, neutral for unchanged. A legend explains the colours and shapes.
-- Edges come from `next`, with their labels.
-- A block with children shows ⊕ after its label. When expanded, it becomes a `subgraph` titled with its label (⊖ prefix), containing its children and their edges. Edges that pointed at the block now point at the subgraph.
-- All label text is escaped for Mermaid, covering quotes, brackets, braces, `#`, `<`, `>` and `|`.
-- After rendering, the view attaches click and keyboard handlers to the nodes by id. The nodes become focusable (`tabindex=0`, `role=button`, with an `aria-label` that names the kind, the label and whether the block expands or opens functions).
-- Clicking a block opens the function panel; Enter does the same. Ctrl-click or ⌘-click (Ctrl/⌘+Enter on the keyboard) expands or collapses a block with children. The legend and each node's tooltip say so.
+- `layoutFlow(tree, expanded)` (in `lib/logicFlow.ts`) builds an ELK graph from the tree, where an expanded block is a compound node holding its steps. It lays the graph out and returns React Flow nodes (parents before children, positions relative to the parent) and edges.
+- Each block is a card. The card shows:
+  - its kind (▶ entry, ▸ step, ◇ decision, ↻ loop, ⚡ async, ■ exit);
+  - its label;
+  - a "⊕ N steps" badge when it has steps inside;
+  - how many functions sit behind it.
+- Card fill comes from `change`: green for added, amber for changed, neutral for unchanged. An exit has a red outline. A legend explains the colours, icons and the red outline.
+- Card heights follow the number of lines the label wraps to, so nothing overflows.
+- An expanded block is a dashed group box titled "⊖ label", with its steps and their edges inside. Its title wraps onto a second line when long.
+- Edges come from `next` and keep their labels. Edges to an expanded block go to its group box.
+- Labels are plain React text, never HTML. Claude's block ids are used only as React Flow node ids.
+- Every card and group box is focusable (`role=button`, `tabindex=0`), with an `aria-label` that names the kind and the label and says whether the block expands. The same text is the hover tooltip.
+- Clicking a block opens the function panel; Enter does the same. Ctrl-click or ⌘-click (Ctrl/⌘+Enter on the keyboard) expands or collapses a block with children. The legend says so.
+- After a relayout, focus returns to the block last activated.
+- The chart pans and zooms, and has zoom controls. It fits itself to view after each layout and whenever its box changes width, for example when the function panel opens.
+- Cards don't start a pan when pressed (React Flow's `nopan` class); drag the background to pan.
 - The expanded set is saved per PR with `savePref(pr, "logicExpanded", ids)`.
-- A visually hidden nested list mirrors the tree for screen readers. If Mermaid throws, the same list is shown visibly instead, with the same expand and open actions.
-- Theme: the chart uses Mermaid's dark theme when the app is in dark mode.
+- If ELK can't lay the map out, the view shows it as a nested list instead, with the same open and expand actions and a separate ⊕/⊖ button per block.
+- Theme: React Flow's colour mode follows the app's dark mode.
 
 ### Function panel
 
@@ -231,11 +229,12 @@ The source endpoint never reads outside the worktree, and only the map's owner c
 
 **vitest:**
 
-- `toMermaid`:
-  - shapes and classes per `kind` and `change`;
-  - edges and their labels;
-  - expanded blocks become subgraphs, and edges are redirected to them;
-  - escaping of awkward labels.
+- `logicFlow`:
+  - card sizes grow with wrapped labels;
+  - collapsed blocks are plain nodes, and expanded ones are compound nodes holding their steps and edges;
+  - the layout returns parents before children, with relative positions;
+  - edges keep their labels;
+  - ids and labels pass through as data, never as markup.
 - `LogicView`:
   - each state in the States table;
   - expand and collapse, with persistence;
@@ -243,7 +242,8 @@ The source endpoint never reads outside the worktree, and only the map's owner c
   - a leaf opens the panel, with changed lines highlighted;
   - Show in Code view switches tabs;
   - Esc closes the panel;
-  - a Mermaid failure shows the list fallback.
+  - a layout failure shows the list fallback;
+  - the legend explains the red outline.
 - The `?view=logic` tab survives a reload, and switching tabs keeps unsent composer text.
 
 **Playwright** (the fake ask returns a canned map):
