@@ -291,6 +291,30 @@ async def preview(request: Request, owner: str, repo: str, number: int, b: Body)
     return {"html": html}
 
 
+@app.get("/api/pr/{owner}/{repo}/{number}/mentionable")
+async def mentionable(request: Request, owner: str, repo: str, number: int, q: str = ""):
+    client = await gh(request)
+    return await client.mentionable_users(PRRef(owner, repo, number), q.lstrip("@"))
+
+
+@app.patch("/api/pr/{owner}/{repo}/{number}/comments/{comment_id}")
+async def edit_review_comment(request: Request, owner: str, repo: str, number: int, comment_id: int, b: Body):
+    client = await gh(request)
+    return await client.edit_review_comment(PRRef(owner, repo, number), comment_id, _require_body(b.body))
+
+
+@app.patch("/api/pr/{owner}/{repo}/{number}/conversation/{comment_id}")
+async def edit_conversation_comment(request: Request, owner: str, repo: str, number: int, comment_id: int, b: Body):
+    client = await gh(request)
+    return await client.edit_conversation_comment(PRRef(owner, repo, number), comment_id, _require_body(b.body))
+
+
+@app.patch("/api/pr/{owner}/{repo}/{number}/reviews/{review_id}")
+async def edit_review(request: Request, owner: str, repo: str, number: int, review_id: int, b: Body):
+    client = await gh(request)
+    return await client.edit_review(PRRef(owner, repo, number), review_id, _require_body(b.body))
+
+
 @app.post("/api/threads/{thread_id}/resolve")
 async def resolve(request: Request, thread_id: str, r: Resolve):
     client = await gh(request)

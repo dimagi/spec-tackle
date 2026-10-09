@@ -10,7 +10,12 @@ export type Comment = {
   bodyHTML: string;
   createdAt: string;
   url: string;
+  /** Whether the viewer may edit it on GitHub. */
+  canEdit: boolean;
 };
+
+/** Someone who can be @mentioned in the PR's repo. */
+export type MentionUser = { login: string; name: string | null; avatarUrl: string };
 
 export type Thread = {
   id: string;

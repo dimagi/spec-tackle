@@ -53,6 +53,32 @@ test("reply and resolve", async ({ page }) => {
   await expect(card).toBeVisible();
 });
 
+test("mention someone in a reply, then edit the reply", async ({ page }) => {
+  await page.goto(PAGE);
+  const card = page.locator(".thread-card", { hasText: "How long is the backoff?" });
+  const reply = card.locator(".thread-reply textarea");
+  await reply.click();
+  await reply.pressSequentially("Ask @b");
+  await card.getByRole("option", { name: /bob/ }).click();
+  await expect(reply).toHaveValue("Ask @bob ");
+  await reply.press("ControlOrMeta+Enter");
+  await expect(card).toContainText("Ask @bob");
+
+  const mine = card.locator(".comment").last();
+  await expect(mine).toContainText("Ask @bob");
+  await mine.getByRole("button", { name: "Comment options" }).click();
+  await mine.getByRole("menuitem", { name: "Edit" }).click();
+  await mine.getByRole("combobox", { name: "Edit comment" }).fill("Ask @ann instead");
+  await mine.getByRole("button", { name: "Save" }).click();
+
+  await expect(page.getByText("Comment updated")).toBeVisible();
+  await expect(card).toContainText("Ask @ann instead");
+  // Only your own comments can be edited.
+  await card.locator(".comment", { hasText: "How long" }).getByRole("button", { name: "Comment options" }).click();
+  await expect(card.getByRole("menuitem", { name: "Copy link" })).toBeVisible();
+  await expect(card.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
+});
+
 test("dark theme", async ({ page }) => {
   await page.goto(PAGE);
   await page.getByTitle("Dark").click();

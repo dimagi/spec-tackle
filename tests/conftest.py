@@ -59,6 +59,7 @@ class FakeGitHub:
 
     def __init__(self):
         self.overview_calls = 0
+        self.edits: list[tuple] = []
 
     async def overview(self, pr):
         self.overview_calls += 1
@@ -83,6 +84,22 @@ class FakeGitHub:
     async def review_requests(self):
         return [{"owner": "o", "repo": "r", "number": 8, "title": "Next spec", "author": "ann",
                  "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]
+
+    async def mentionable_users(self, pr, query):
+        self.mention_queries = [*getattr(self, "mention_queries", []), query]
+        return [{"login": "ann", "name": "Ann", "avatarUrl": ""}]
+
+    async def edit_review_comment(self, pr, comment_id, body):
+        self.edits.append(("review-comment", comment_id, body))
+        return {"id": comment_id}
+
+    async def edit_conversation_comment(self, pr, comment_id, body):
+        self.edits.append(("comment", comment_id, body))
+        return {"id": comment_id}
+
+    async def edit_review(self, pr, review_id, body):
+        self.edits.append(("review", review_id, body))
+        return {"id": review_id}
 
 
 class FakeSession:

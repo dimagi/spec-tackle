@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "../state/toasts";
 
-/** The "⋯" menu on a comment, like GitHub's: copy its link or open it on GitHub. */
-export function CommentMenu({ url, className = "" }: { url: string; className?: string }) {
+/** The "⋯" menu on a comment, like GitHub's: edit it (when `onEdit` is given), copy its link or open it on GitHub. */
+export function CommentMenu({ url, onEdit, className = "" }: { url: string; onEdit?: () => void; className?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
@@ -34,6 +34,7 @@ export function CommentMenu({ url, className = "" }: { url: string; className?: 
         aria-expanded={open} onClick={() => setOpen(!open)}>⋯</button>
       {open && (
         <div role="menu" className="comment-menu">
+          {onEdit && <button type="button" role="menuitem" onClick={() => { setOpen(false); onEdit(); }}>Edit</button>}
           <button type="button" role="menuitem" onClick={copy}>Copy link</button>
           <a role="menuitem" href={url} target="_blank" rel="noopener" onClick={() => setOpen(false)}>Open on GitHub ↗</a>
         </div>

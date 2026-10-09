@@ -42,6 +42,7 @@ Opens `http://127.0.0.1:8765` through a one-time link (also printed in the termi
 - **Comments in the margin**: review threads sit next to the passage they discuss, and that passage is highlighted. Click either one to focus the other.
 - **Comment anywhere**: hover a block and click **+**, or select text and press **c**. Comments post straight to the PR as review comments. If the text didn't change in the PR, GitHub won't accept a line comment there, so the composer says so and posts a file comment that names the lines.
 - **Reply, resolve or reopen** threads. Reply drafts are saved locally.
+- **Edit, copy a link, @mention**: each comment's **⋯** menu copies its GitHub link, opens it on GitHub, and lets you edit comments you're allowed to edit. Type `@` in any comment box to pick someone: people on the PR first, then anyone who can be mentioned in the repo.
 - **Light / dark / system theme** toggle in the top bar (defaults to light, remembered per browser).
 - **Live**: the page checks GitHub every 30 seconds. New comments are flagged and announced, and the tab title shows an unread count. You're told when new commits land.
 - **Reviewer tools**: Open/All filter, hide bot comments, open-thread counts per section, `j`/`k` to jump between open threads, a PR switcher on the title (or `p`) listing PRs awaiting your review and ones you opened recently, and a **Finish review** button (Comment / Approve / Request changes).

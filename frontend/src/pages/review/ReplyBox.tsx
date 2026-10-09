@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MentionTextarea } from "../../components/MentionTextarea";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 
 type Props = {
@@ -9,11 +10,13 @@ type Props = {
   help?: string;
   submitLabel?: string;
   disabled?: boolean;
+  /** Suggest people after an `@`; off for replies that stay private. */
+  mentions?: boolean;
   onSubmit: (body: string) => Promise<unknown> | void;
   onFocus: () => void;
 };
 
-export function ReplyBox({ threadId, pr, placeholder = "Reply…", help = "⌘↵ to send", submitLabel = "Reply", disabled, onSubmit, onFocus }: Props) {
+export function ReplyBox({ threadId, pr, placeholder = "Reply…", help = "⌘↵ to send", submitLabel = "Reply", disabled, mentions = false, onSubmit, onFocus }: Props) {
   const draftKey = `draft:${threadId}`;
   const [text, setText] = useState(() => (pr ? loadPref<string>(pr, draftKey, "") || "" : ""));
   const [open, setOpen] = useState(!!text);
@@ -42,12 +45,13 @@ export function ReplyBox({ threadId, pr, placeholder = "Reply…", help = "⌘�
 
   return (
     <div className="thread-reply">
-      <textarea
+      <MentionTextarea
         rows={open ? 3 : 1}
         placeholder={placeholder}
         value={text}
         disabled={disabled}
-        onChange={(e) => change(e.target.value)}
+        mentions={mentions}
+        onValueChange={change}
         onFocus={() => { setOpen(true); onFocus(); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {

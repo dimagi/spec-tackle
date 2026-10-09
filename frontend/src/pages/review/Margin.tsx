@@ -1,5 +1,5 @@
 import { useRef, type ReactNode, type RefObject } from "react";
-import type { ClaudeThread, Thread } from "../../api/types";
+import type { ClaudeThread, Comment, Thread } from "../../api/types";
 import { isCollapsible, isShown, threadRange } from "../../lib/threads";
 import { useReview } from "../../state/review";
 import { useReviewPage } from "./context";
@@ -12,6 +12,7 @@ type Props = {
   docRef: RefObject<HTMLElement | null>;
   engineRef: RefObject<MarginEngine | null>;
   onResolve: (thread: Thread, resolved: boolean) => void;
+  onEdit: (comment: Comment, body: string) => Promise<unknown>;
   renderReply: (thread: Thread) => ReactNode;
   /** The composer card's content, when one is open. */
   composer: ReactNode;
@@ -25,7 +26,7 @@ type Props = {
 
 const isInteractive = (target: EventTarget) => !!(target as Element).closest("a, textarea, button");
 
-export function Margin({ docRef, engineRef, onResolve, renderReply, composer, claude }: Props) {
+export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, composer, claude }: Props) {
   const { activity, fresh } = useReviewPage();
   const s = useReview((st) => st);
   const marginRef = useRef<HTMLDivElement>(null);
@@ -63,6 +64,7 @@ export function Margin({ docRef, engineRef, onResolve, renderReply, composer, cl
               onExpand={() => s.expand(t.id)} onCollapse={() => s.collapse(t.id)}
               onExpandBody={(id) => { s.expandBody(id); engine.current.scheduleLayout(); }}
               onResolve={(resolved) => onResolve(t, resolved)}
+              onEdit={onEdit}
             >
               {renderReply(t)}
             </ThreadCard>
