@@ -82,7 +82,9 @@ export function useMarginEngine(
     const margin = marginRef.current;
     if (!margin || !margin.offsetParent) return;
     const base = margin.getBoundingClientRect().top;
-    const cards = [...margin.querySelectorAll<HTMLElement>(":scope > [data-card]")].filter((el) => !el.hidden);
+    // An enlarged card sits over the page, out of the margin's flow.
+    const cards = [...margin.querySelectorAll<HTMLElement>(":scope > [data-card]")]
+      .filter((el) => !el.hidden && !el.classList.contains("is-enlarged"));
     const placed = cards
       .map((el) => ({ el, id: el.dataset.card!, top: anchorRect(el.dataset.card!) }))
       .filter((c): c is { el: HTMLElement; id: string; top: number } => c.top !== null)

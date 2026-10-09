@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Comment, Thread } from "../../api/types";
+import { CommentEditor } from "../../components/CommentEditor";
+import { CommentMenu } from "../../components/CommentMenu";
 import { RelativeTime } from "../../components/RelativeTime";
 import { externalLinks } from "../../lib/links";
 import { rangeLabel, threadRange } from "../../lib/threads";
@@ -15,6 +17,11 @@ export type ThreadCardProps = {
   onCollapse: () => void;
   onExpandBody: (commentId: number) => void;
   onResolve: (resolved: boolean) => void;
+  enlarged?: boolean;
+  /** Show the thread large in the middle of the page, or put it back in the margin. */
+  onEnlarge?: (enlarged: boolean) => void;
+  /** Save an edited comment; without it, comments can't be edited here. */
+  onEdit?: (comment: Comment, body: string) => Promise<unknown>;
   /** The reply box, below the comments. */
   children?: ReactNode;
 };
@@ -26,14 +33,20 @@ const textOf = (html: string) => {
 };
 
 
-function CommentView({ c, fresh, expanded, onExpand }: { c: Comment; fresh: boolean; expanded: boolean; onExpand: () => void }) {
+type CommentViewProps = {
+  c: Comment; fresh: boolean; expanded: boolean; onExpand: () => void;
+  onEdit?: (body: string) => Promise<unknown>;
+};
+
+function CommentView({ c, fresh, expanded, onExpand, onEdit }: CommentViewProps) {
   const body = useRef<HTMLDivElement>(null);
+  const [editing, setEditing] = useState(false);
   // Fade out very long comments (bot reviews!) behind a "Show more".
   const [tall, setTall] = useState(false);
   useLayoutEffect(() => {
     externalLinks(body.current);
     if (body.current && body.current.scrollHeight > 230) setTall(true);
-  }, [c.bodyHTML]);
+  }, [c.bodyHTML, editing]);
   const clamped = tall && !expanded;
   return (
     <div className="comment" data-comment={c.id}>
@@ -44,16 +57,35 @@ function CommentView({ c, fresh, expanded, onExpand }: { c: Comment; fresh: bool
           {c.author.isBot && <span className="chip chip-bot">bot</span>}
           <RelativeTime iso={c.createdAt} />
           {fresh && <span className="chip chip-new">new</span>}
+          <CommentMenu url={c.url} onEdit={c.canEdit && onEdit ? () => setEditing(true) : undefined} className="ml-auto self-center" />
         </div>
-        <div ref={body} className={`comment-body prose prose-stone prose-sm max-w-none dark:prose-invert ${clamped ? "clamped" : ""}`}
-          dangerouslySetInnerHTML={{ __html: c.bodyHTML }} />
-        {clamped && <button className="more-btn" onClick={onExpand}>Show more</button>}
+        {editing && onEdit ? (
+          <CommentEditor initial={c.body} onCancel={() => setEditing(false)}
+            onSave={async (text) => { await onEdit(text); setEditing(false); }} />
+        ) : (
+          <>
+            <div ref={body} className={`comment-body prose prose-stone prose-sm max-w-none dark:prose-invert ${clamped ? "clamped" : ""}`}
+              dangerouslySetInnerHTML={{ __html: c.bodyHTML }} />
+            {clamped && <button className="more-btn" onClick={onExpand}>Show more</button>}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-export function ThreadCard({ thread: t, collapsed, collapsible, active, fresh, bodyExpanded, onExpand, onCollapse, onExpandBody, onResolve, children }: ThreadCardProps) {
+/** Toggles a margin card between its normal size and a large centered view. */
+export function EnlargeButton({ enlarged, onEnlarge }: { enlarged: boolean; onEnlarge: (enlarged: boolean) => void }) {
+  return (
+    <button type="button" className="icon-btn" aria-pressed={enlarged}
+      aria-label={enlarged ? "Shrink thread" : "Enlarge thread"} title={enlarged ? "Back to the margin (Esc)" : "Enlarge to read"}
+      onClick={() => onEnlarge(!enlarged)}>
+      {enlarged ? "⤡" : "⤢"}
+    </button>
+  );
+}
+
+export function ThreadCard({ thread: t, collapsed, collapsible, active, fresh, bodyExpanded, onExpand, onCollapse, onExpandBody, onResolve, onEdit, enlarged = false, onEnlarge, children }: ThreadCardProps) {
   const range = threadRange(t);
   const freshCount = t.comments.filter((c) => fresh.has(c.id)).length;
   let where: ReactNode = null;
@@ -73,6 +105,7 @@ export function ThreadCard({ thread: t, collapsed, collapsible, active, fresh, b
         {t.isResolved
           ? <button className="icon-btn" onClick={() => onResolve(false)}>Reopen</button>
           : <button className="icon-btn" title="Mark as resolved" onClick={() => onResolve(true)}>✓ Resolve</button>}
+        {onEnlarge && <EnlargeButton enlarged={enlarged} onEnlarge={onEnlarge} />}
         <a className="icon-btn" href={first.url} target="_blank" rel="noopener" title="Open on GitHub">↗</a>
       </div>
       <div className="thread-body">
@@ -86,7 +119,8 @@ export function ThreadCard({ thread: t, collapsed, collapsible, active, fresh, b
         ) : (
           <>
             {t.comments.map((c) => (
-              <CommentView key={c.id} c={c} fresh={fresh.has(c.id)} expanded={bodyExpanded(c.id)} onExpand={() => onExpandBody(c.id)} />
+              <CommentView key={c.id} c={c} fresh={fresh.has(c.id)} expanded={bodyExpanded(c.id)} onExpand={() => onExpandBody(c.id)}
+                onEdit={onEdit && ((body) => onEdit(c, body))} />
             ))}
             {collapsible && !active && (
               <div className="px-3 pb-2"><button className="more-btn" onClick={onCollapse}>Collapse</button></div>

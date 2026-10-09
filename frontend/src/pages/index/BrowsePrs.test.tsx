@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import type { PrSummary, Repo } from "../../api/types";
+import { usePrFilters } from "../../state/prFilters";
 import { recordRecent } from "../../state/recents";
 import { BrowsePrs } from "./BrowsePrs";
 
@@ -11,7 +12,7 @@ const repo = (owner: string, name: string, over: Partial<Repo> = {}): Repo => ({
 });
 const pr = (number: number, title: string, over: Partial<PrSummary> = {}): PrSummary => ({
   owner: "dimagi", repo: "connect", number, title, author: "ann", updatedAt: "2026-10-08T09:00:00Z",
-  isDraft: false, url: `https://github.com/dimagi/connect/pull/${number}`, ...over,
+  isDraft: false, review: "pending", url: `https://github.com/dimagi/connect/pull/${number}`, ...over,
 });
 
 const MINE = [repo("dimagi", "connect", { openPrs: 4, isPrivate: true }), repo("me", "dots")];
@@ -56,7 +57,10 @@ function setup(start = "/") {
 
 const optionTexts = () => screen.getAllByRole("option").map((o) => o.textContent);
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  usePrFilters.setState(usePrFilters.getInitialState());
+});
 afterEach(() => vi.unstubAllGlobals());
 
 test("lists recently opened repos first, then your GitHub repos, each once", async () => {
@@ -78,7 +82,7 @@ test("picking a repo lists its open PRs and remembers the repo in the URL", asyn
   setup();
   await userEvent.click(await screen.findByRole("option", { name: /dimagi\/connect/ }));
   expect(await screen.findByText("Retry spec")).toBeInTheDocument();
-  expect(screen.getByText("draft")).toBeInTheDocument();
+  expect(screen.getByText("1 pull request more hidden by the filters")).toBeInTheDocument();
   expect(screen.getByTestId("where")).toHaveTextContent("/?repo=dimagi%2Fconnect");
 
   await userEvent.click(screen.getByRole("option", { name: /Retry spec/ }));
@@ -110,6 +114,7 @@ test("the PR filter matches title, number or author", async () => {
   serve(DEFAULT_ROUTES);
   setup("/?repo=dimagi/connect");
   await screen.findByText("Retry spec");
+  await userEvent.click(screen.getByRole("button", { name: "Draft" }));
   const box = screen.getByRole("textbox", { name: "Filter pull requests" });
   await userEvent.type(box, "draft");
   expect(optionTexts()).toEqual([expect.stringContaining("Draft thing")]);
@@ -126,6 +131,8 @@ test("arrow keys and Enter pick a repo, then a PR", async () => {
   await userEvent.keyboard("{ArrowDown}{ArrowUp}{Enter}");
   await screen.findByText("Retry spec");
   await userEvent.click(screen.getByRole("textbox", { name: "Filter pull requests" }));
+  await userEvent.click(screen.getByRole("button", { name: "Draft" }));
+  expect(screen.getByRole("textbox", { name: "Filter pull requests" })).toHaveFocus();
   await userEvent.keyboard("{ArrowDown}{Enter}");
   expect(screen.getByTestId("where")).toHaveTextContent("/pr/dimagi/connect/6");
 });
@@ -155,4 +162,30 @@ test("nothing found says so", async () => {
   setup();
   await userEvent.type(screen.getByRole("textbox", { name: "Find a repository" }), "zzz");
   await waitFor(() => expect(screen.getByText("No repositories found")).toBeInTheDocument());
+});
+
+test("by default only open PRs show; the Draft chip brings drafts back", async () => {
+  serve({ "/api/repos/dimagi/connect/pulls": { body: [
+    pr(5, "Retry spec"), pr(6, "Draft thing", { isDraft: true }),
+    pr(7, "Signed off", { review: "approved" }), pr(8, "Needs work", { review: "changes_requested" }),
+  ] } });
+  setup("/?repo=dimagi/connect");
+  await screen.findByText("Retry spec");
+  expect(optionTexts()).toEqual([
+    expect.stringContaining("Retry spec"), expect.stringContaining("Signed off"), expect.stringContaining("Needs work"),
+  ]);
+  expect(screen.getByText("approved")).toBeInTheDocument();
+  expect(screen.getByText("changes requested")).toBeInTheDocument();
+  expect(screen.getByText("1 pull request more hidden by the filters")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Draft" }));
+  expect(screen.getByRole("button", { name: "Draft" })).toHaveAttribute("aria-pressed", "true");
+  expect(optionTexts()).toHaveLength(4);
+
+  // Only drafts; turning off the last chip does nothing.
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  await userEvent.click(screen.getByRole("button", { name: "Draft" }));
+  expect(optionTexts()).toEqual([expect.stringContaining("Draft thing")]);
+  expect(screen.getByText("3 pull requests more hidden by the filters")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Approved" })).toBeNull();
 });

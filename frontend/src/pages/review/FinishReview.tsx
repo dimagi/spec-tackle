@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MentionTextarea } from "../../components/MentionTextarea";
 import { toast } from "../../state/toasts";
 
 export type ReviewEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
@@ -50,8 +51,8 @@ export function FinishReview({ open, onClose, onSubmit }: Props) {
       <form className="p-6" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <h2 className="text-lg font-semibold">Finish your review</h2>
         <p className="mt-1 text-sm text-stone-500">Your margin comments are already on the PR. This adds an overall verdict.</p>
-        <textarea ref={summary} name="body" rows={5} className="field mt-4" placeholder="Summary (optional for approvals)"
-          value={body} onChange={(e) => setBody(e.target.value)} />
+        <MentionTextarea ref={summary} name="body" rows={5} className="field mt-4" placeholder="Summary (optional for approvals)"
+          value={body} onValueChange={setBody} />
         <div className="mt-4 space-y-2 text-sm">
           {CHOICES.map((c) => (
             <label key={c.value} className="choice">

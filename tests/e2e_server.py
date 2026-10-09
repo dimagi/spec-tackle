@@ -30,20 +30,30 @@ HEAD = "e2e0000headsha"
 DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff.\n\n## Limits\n\nAt most five tries.\n"
 ME = {"__typename": "User", "login": "me", "avatarUrl": ""}
 ANN = {"__typename": "User", "login": "ann", "avatarUrl": ""}
-TITLES = {7: "Retry failed form submissions", 8: "Rename the sync queue"}
+TITLES = {7: "Retry failed form submissions", 8: "Rename the sync queue", 9: "Offline mode", 10: "Bump the retry limit"}
+# Each PR's state in the PR lists: (draft, review).
+PR_STATES = {7: (False, "pending"), 8: (False, "changes_requested"), 9: (True, "pending"), 10: (False, "approved")}
 ids = itertools.count(1000)
 
 
 def comment(author: dict, body: str) -> dict:
     n = next(ids)
     return {"databaseId": n, "author": author, "body": body, "bodyHTML": f"<p>{body}</p>",
-            "createdAt": "2026-10-08T09:00:00Z", "url": f"https://github.com/o/r/pull/7#c{n}"}
+            "createdAt": "2026-10-08T09:00:00Z", "url": f"https://github.com/o/r/pull/7#c{n}",
+            "viewerCanUpdate": author is ME}
 
 
 def thread(line: int, first: dict, resolved: bool = False) -> dict:
     return {"id": f"T{next(ids)}", "path": "docs/retry.md", "line": line, "startLine": None,
             "originalLine": line, "originalStartLine": None, "isResolved": resolved, "isOutdated": False,
             "subjectType": "LINE", "diffSide": "RIGHT", "resolvedBy": None, "comments": {"nodes": [first]}}
+
+
+def pr_summary(n: int, owner: str = "o", repo: str = "r") -> dict:
+    draft, review = PR_STATES[n]
+    return {"owner": owner, "repo": repo, "number": n, "title": TITLES[n], "author": "ann",
+            "updatedAt": "2026-10-08T09:00:00Z", "isDraft": draft, "review": review,
+            "url": f"https://github.com/{owner}/{repo}/pull/{n}"}
 
 
 class FakeGitHub:
@@ -112,13 +122,29 @@ class FakeGitHub:
                  "pushedAt": "2026-10-08T09:00:00Z", "openPrs": 2}]
 
     async def open_pulls(self, owner, repo):
-        return [{"owner": owner, "repo": repo, "number": n, "title": TITLES[n], "author": "ann",
-                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": f"https://github.com/{owner}/{repo}/pull/{n}"}
-                for n in (8, 7)]
+        return [pr_summary(n, owner, repo) for n in (8, 7, 9, 10)]
 
     async def review_requests(self):
-        return [{"owner": "o", "repo": "r", "number": 8, "title": TITLES[8], "author": "ann",
-                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]
+        return [pr_summary(n) for n in (8, 10)]
+
+    async def mentionable_users(self, pr, query):
+        people = [{"login": "ann", "name": "Ann Lee", "avatarUrl": ""}, {"login": "bob", "name": "Bob Kim", "avatarUrl": ""}]
+        return [p for p in people if p["login"].startswith(query.lower())]
+
+    def _edit(self, comments, comment_id, body):
+        for c in comments:
+            if c["databaseId"] == comment_id:
+                c["body"], c["bodyHTML"] = body, f"<p>{body}</p>"
+        return {"id": comment_id}
+
+    async def edit_review_comment(self, pr, comment_id, body):
+        return self._edit([c for t in self.threads for c in t["comments"]["nodes"]], comment_id, body)
+
+    async def edit_conversation_comment(self, pr, comment_id, body):
+        return self._edit(self.conversation, comment_id, body)
+
+    async def edit_review(self, pr, review_id, body):
+        return self._edit(self.reviews, review_id, body)
 
     async def set_thread_resolved(self, thread_id, resolved):
         for t in self.threads:

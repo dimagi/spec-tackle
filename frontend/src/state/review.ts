@@ -16,6 +16,8 @@ export type ReviewState = {
   composer: ComposerTarget | null;
   expanded: Set<string>;
   expandedBodies: Set<number>;
+  /** The thread shown large in the middle of the page, if any. */
+  enlarged: string | null;
   setFilter: (f: "open" | "all") => void;
   setHideBots: (v: boolean) => void;
   setShowClaude: (v: boolean) => void;
@@ -23,6 +25,7 @@ export type ReviewState = {
   expand: (id: string) => void;
   collapse: (id: string) => void;
   expandBody: (commentId: number) => void;
+  enlarge: (id: string | null) => void;
   openComposer: (target: ComposerTarget) => void;
   setComposerMode: (mode: ComposerMode) => void;
   closeComposer: () => void;
@@ -38,10 +41,16 @@ export function createReviewStore(pr: PRRef): StoreApi<ReviewState> {
     composer: null,
     expanded: new Set(),
     expandedBodies: new Set(),
+    enlarged: null,
     setFilter: (filter) => { savePref(pr, "filter", filter); set({ filter }); },
     setHideBots: (hideBots) => { savePref(pr, "hideBots", hideBots); set({ hideBots }); },
     setShowClaude: (showClaude) => { savePref(pr, "showClaude", showClaude); set({ showClaude }); },
-    activate: (active, opts) => set({ active, scrollSeq: opts?.scroll ? get().scrollSeq + 1 : get().scrollSeq }),
+    // While a thread is enlarged, moving to another thread (j/k) enlarges that one instead.
+    activate: (active, opts) => set({
+      active,
+      scrollSeq: opts?.scroll ? get().scrollSeq + 1 : get().scrollSeq,
+      enlarged: get().enlarged && active && active !== "composer" ? active : null,
+    }),
     expand: (id) => set({ expanded: new Set(get().expanded).add(id), active: id }),
     collapse: (id) => {
       const expanded = new Set(get().expanded);
@@ -49,6 +58,9 @@ export function createReviewStore(pr: PRRef): StoreApi<ReviewState> {
       set({ expanded, active: get().active === id ? null : get().active });
     },
     expandBody: (commentId) => set({ expandedBodies: new Set(get().expandedBodies).add(commentId) }),
+    enlarge: (enlarged) => set(enlarged
+      ? { enlarged, active: enlarged, expanded: new Set(get().expanded).add(enlarged) }
+      : { enlarged: null }),
     openComposer: (composer) => set({ composer, active: "composer" }),
     setComposerMode: (mode) => {
       const c = get().composer;

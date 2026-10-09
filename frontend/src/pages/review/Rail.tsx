@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { PageFile } from "../../api/types";
 import { fileTree, type TreeNode } from "../../lib/fileTree";
+import { clampRailWidth, loadRailWidth, RAIL_DEFAULT, RAIL_MAX, RAIL_MIN, saveRailWidth } from "../../lib/railWidth";
 import { useReview } from "../../state/review";
 import type { FileView } from "./FileSection";
 import { useScrollSpy } from "./hooks/useScrollSpy";
@@ -29,6 +30,36 @@ export function Rail({ files, views, claude, stats, headingCounts, conversationC
     "conversation",
   ];
   const current = targets[useScrollSpy(targets)];
+  const [width, setWidth] = useState(loadRailWidth);
+  useEffect(() => {
+    saveRailWidth(width);
+    // The document column changed width, so the margin cards need to line up again.
+    window.dispatchEvent(new Event("spec-tackle:layout"));
+  }, [width]);
+
+  const startResize = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX, startWidth = width;
+    const move = (ev: globalThis.PointerEvent) => setWidth(clampRailWidth(startWidth + ev.clientX - startX));
+    const stop = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", stop);
+      document.body.classList.remove("resizing-rail");
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop);
+    document.body.classList.add("resizing-rail");
+  };
+  const resizeByKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const steps: Record<string, number> = { ArrowLeft: -16, ArrowRight: 16 };
+    if (e.key in steps) setWidth((w) => clampRailWidth(w + steps[e.key]));
+    else if (e.key === "Home") setWidth(RAIL_MIN);
+    else if (e.key === "End") setWidth(RAIL_MAX);
+    else return;
+    e.preventDefault();
+  };
+
   const toggle = (path: string) => setCollapsed((c) => {
     const next = new Set(c);
     if (!next.delete(path)) next.add(path);
@@ -68,7 +99,7 @@ export function Rail({ files, views, claude, stats, headingCounts, conversationC
           const count = headingCounts.get(`${node.file.path}#${h.id}`) ?? 0;
           return (
             <a key={h.id} href={`#${h.id}`} className={link(h.id, "")} style={indent(depth + h.level - 1, CHEVRON + 1.25)}>
-              <span className="truncate">{h.text}</span>
+              <span className="truncate" title={h.text}>{h.text}</span>
               <span className="count" hidden={!count}>{count}</span>
             </a>
           );
@@ -78,7 +109,8 @@ export function Rail({ files, views, claude, stats, headingCounts, conversationC
   };
 
   return (
-    <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 flex-col overflow-y-auto border-r border-stone-200 px-4 py-6 text-sm lg:flex dark:border-stone-800">
+    <div className="sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 lg:block" style={{ width }}>
+    <aside className="flex h-full flex-col overflow-y-auto border-r border-stone-200 px-4 py-6 text-sm dark:border-stone-800">
       <section className="mb-6">
         <h2 className="rail-heading">Review</h2>
         <div className="grid grid-cols-2 gap-2">
@@ -134,6 +166,13 @@ export function Rail({ files, views, claude, stats, headingCounts, conversationC
         <div><kbd>Esc</kbd> close</div>
       </section>
     </aside>
+      <div
+        role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabIndex={0}
+        aria-valuenow={width} aria-valuemin={RAIL_MIN} aria-valuemax={RAIL_MAX}
+        title="Drag to resize · double-click to reset" className="rail-resizer"
+        onPointerDown={startResize} onDoubleClick={() => setWidth(RAIL_DEFAULT)} onKeyDown={resizeByKey}
+      />
+    </div>
   );
 }
 

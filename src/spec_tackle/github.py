@@ -69,15 +69,15 @@ _ACTIVITY_FIELDS = f"""
       id isResolved isOutdated path line startLine originalLine originalStartLine
       diffSide subjectType resolvedBy {{ login }}
       comments(first: 100) {{
-        nodes {{ id databaseId {_AUTHOR} body bodyHTML createdAt url replyTo {{ databaseId }} }}
+        nodes {{ id databaseId {_AUTHOR} body bodyHTML createdAt url viewerCanUpdate replyTo {{ databaseId }} }}
       }}
     }}
   }}
   comments(first: 100) {{
-    nodes {{ databaseId {_AUTHOR} body bodyHTML createdAt url }}
+    nodes {{ databaseId {_AUTHOR} body bodyHTML createdAt url viewerCanUpdate }}
   }}
   reviews(first: 100) {{
-    nodes {{ databaseId state {_AUTHOR} body bodyHTML submittedAt url }}
+    nodes {{ databaseId state {_AUTHOR} body bodyHTML submittedAt url viewerCanUpdate }}
   }}
 """
 
@@ -105,18 +105,23 @@ query($owner: String!, $repo: String!, $number: Int!) {{
 """
 
 
-_REVIEW_REQUESTS_QUERY = """
-query {
-  search(query: "is:open is:pr review-requested:@me sort:updated-desc", type: ISSUE, first: 20) {
-    nodes {
-      ... on PullRequest {
-        number title isDraft updatedAt url
-        repository { name owner { login } }
-        author { login }
-      }
-    }
-  }
-}
+# What a PR list row needs, including enough review state to tell whether it's approved.
+_PR_SUMMARY_FIELDS = """
+  number title isDraft updatedAt url author { login }
+  reviewDecision latestOpinionatedReviews(first: 30) { nodes { state } }
+"""
+
+_REVIEW_REQUESTS_QUERY = f"""
+query {{
+  search(query: "is:open is:pr review-requested:@me sort:updated-desc", type: ISSUE, first: 20) {{
+    nodes {{
+      ... on PullRequest {{
+        {_PR_SUMMARY_FIELDS}
+        repository {{ name owner {{ login }} }}
+      }}
+    }}
+  }}
+}}
 """
 
 
@@ -146,12 +151,54 @@ query($q: String!) {{
 }}
 """
 
-_OPEN_PULLS_QUERY = """
-query($owner: String!, $repo: String!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequests(states: OPEN, first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { number title isDraft updatedAt url author { login } }
+_OPEN_PULLS_QUERY = f"""
+query($owner: String!, $repo: String!) {{
+  repository(owner: $owner, name: $repo) {{
+    pullRequests(states: OPEN, first: 50, orderBy: {{field: UPDATED_AT, direction: DESC}}) {{
+      nodes {{ {_PR_SUMMARY_FIELDS} }}
+    }}
+  }}
+}}
+"""
+
+
+def review_state(node: dict) -> str:
+    """"approved", "changes_requested" or "pending" for a PR.
+
+    GitHub's reviewDecision is null when the repo doesn't require reviews, so fall back
+    to each reviewer's latest verdict.
+    """
+    decision = node.get("reviewDecision")
+    if decision == "APPROVED":
+        return "approved"
+    if decision == "CHANGES_REQUESTED":
+        return "changes_requested"
+    if decision is None:
+        states = {r["state"] for r in (node.get("latestOpinionatedReviews") or {}).get("nodes") or [] if r}
+        if "CHANGES_REQUESTED" in states:
+            return "changes_requested"
+        if "APPROVED" in states:
+            return "approved"
+    return "pending"
+
+
+def _pr_summary(owner: str, repo: str, node: dict) -> dict:
+    return {
+        "owner": owner,
+        "repo": repo,
+        "number": node["number"],
+        "title": node["title"],
+        "author": (node["author"] or {}).get("login"),
+        "updatedAt": node["updatedAt"],
+        "isDraft": node["isDraft"],
+        "url": node["url"],
+        "review": review_state(node),
     }
+
+_MENTIONABLE_QUERY = """
+query($owner: String!, $repo: String!, $q: String!) {
+  repository(owner: $owner, name: $repo) {
+    mentionableUsers(query: $q, first: 8) { nodes { login name avatarUrl } }
   }
 }
 """
@@ -258,16 +305,7 @@ class GitHub:
         # Orgs the token isn't SSO-authorized for add errors; keep the rest of the results.
         data = await self._graphql(_REVIEW_REQUESTS_QUERY, partial=True)
         pulls = [
-            {
-                "owner": node["repository"]["owner"]["login"],
-                "repo": node["repository"]["name"],
-                "number": node["number"],
-                "title": node["title"],
-                "author": (node["author"] or {}).get("login"),
-                "updatedAt": node["updatedAt"],
-                "isDraft": node["isDraft"],
-                "url": node["url"],
-            }
+            _pr_summary(node["repository"]["owner"]["login"], node["repository"]["name"], node)
             for node in data["search"]["nodes"]
             if node  # non-PR hits are empty objects
         ]
@@ -295,17 +333,19 @@ class GitHub:
         if data["repository"] is None:
             raise GitHubError("Repository not found", 404)
         return [
-            {
-                "owner": owner,
-                "repo": repo,
-                "number": node["number"],
-                "title": node["title"],
-                "author": (node["author"] or {}).get("login"),
-                "updatedAt": node["updatedAt"],
-                "isDraft": node["isDraft"],
-                "url": node["url"],
-            }
+            _pr_summary(owner, repo, node)
             for node in data["repository"]["pullRequests"]["nodes"]
+            if node
+        ]
+
+    async def mentionable_users(self, pr: PRRef, query: str) -> list[dict]:
+        """People who can be @mentioned in the PR's repo, matching `query`."""
+        data = await self._graphql(_MENTIONABLE_QUERY, owner=pr.owner, repo=pr.repo, q=query)
+        if data["repository"] is None:
+            raise GitHubError("Repository not found", 404)
+        return [
+            {"login": node["login"], "name": node["name"], "avatarUrl": node["avatarUrl"]}
+            for node in data["repository"]["mentionableUsers"]["nodes"]
             if node
         ]
 
@@ -360,6 +400,30 @@ class GitHub:
             "POST",
             f"/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/reviews",
             json=payload,
+        )
+        return response.json()
+
+    async def edit_review_comment(self, pr: PRRef, comment_id: int, body: str) -> dict:
+        response = await self._request(
+            "PATCH",
+            f"/repos/{pr.owner}/{pr.repo}/pulls/comments/{comment_id}",
+            json={"body": body},
+        )
+        return response.json()
+
+    async def edit_conversation_comment(self, pr: PRRef, comment_id: int, body: str) -> dict:
+        response = await self._request(
+            "PATCH",
+            f"/repos/{pr.owner}/{pr.repo}/issues/comments/{comment_id}",
+            json={"body": body},
+        )
+        return response.json()
+
+    async def edit_review(self, pr: PRRef, review_id: int, body: str) -> dict:
+        response = await self._request(
+            "PUT",
+            f"/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/reviews/{review_id}",
+            json={"body": body},
         )
         return response.json()
 

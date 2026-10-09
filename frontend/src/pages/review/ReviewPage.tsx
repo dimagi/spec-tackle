@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useBlocker, useNavigate, useParams, useSearchParams } from "react-router";
 import { activityKey, apiBase, claudeKey, useClaudeThreads, useLiveActivity, usePage } from "../../api/queries";
 import { ApiError, onSignedOut, request } from "../../api/request";
-import type { ClaudeThread, Comment, Page, Thread } from "../../api/types";
+import type { ClaudeThread, Comment, ConversationItem, MentionUser, Page, Thread } from "../../api/types";
+import { MentionsCtx, type Mentions } from "../../components/MentionTextarea";
 import { Toaster } from "../../components/Toaster";
 import { applyActivity, initialSeen, type SeenState } from "../../lib/activity";
 import { scrollToLine } from "../../lib/scrollToLine";
@@ -309,6 +310,39 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToLine(path, line, view)));
   };
 
+  /** Save an edited comment; `path` is its route under the PR's API, e.g. `comments/12`. */
+  const editComment = async (path: string, body: string) => {
+    try {
+      await request("PATCH", `${api}/${path}`, { body });
+      toast("Comment updated");
+      await live.refresh();
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+  const editConversation = (item: ConversationItem, body: string) =>
+    editComment(`${item.kind === "review" ? "reviews" : "conversation"}/${item.id}`, body);
+
+  // People on this PR come first when @mentioning.
+  const mentions = useMemo<Mentions>(() => {
+    const people = new Map<string, MentionUser>();
+    const add = (p: { login: string; avatarUrl: string; isBot?: boolean }) => {
+      if (!p.isBot && p.login !== activity.viewer.login && p.login !== "ghost" && !people.has(p.login)) {
+        people.set(p.login, { login: p.login, name: null, avatarUrl: p.avatarUrl });
+      }
+    };
+    add(page.overview.author);
+    for (const t of activity.threads) t.comments.forEach((c) => add(c.author));
+    activity.conversation.forEach((c) => add(c.author));
+    const search = (q: string) => queryClient.fetchQuery({
+      queryKey: ["mentionable", api, q],
+      queryFn: () => request<MentionUser[]>("GET", `${api}/mentionable?q=${encodeURIComponent(q)}`),
+      staleTime: 5 * 60_000,
+    });
+    return { participants: [...people.values()], search };
+  }, [api, page.overview.author, activity, queryClient]);
+
   const postConversation = async (body: string) => {
     try {
       const created = await request<Comment>("POST", `${api}/conversation`, { body });
@@ -349,6 +383,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   useKeyboard({
     step: (direction) => { if (onReview) step(direction); },
     escape: () => {
+      if (store.getState().enlarged) return store.getState().enlarge(null);
       if (store.getState().composer && !composerDirty.current) closeComposer();
       activate(null);
     },
@@ -390,6 +425,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
 
   return (
     <ReviewPageCtx.Provider value={ctx}>
+    <MentionsCtx.Provider value={mentions}>
       <TopBar
         pr={page.pr} overview={page.overview} activity={activity} viewer={page.viewer}
         sync={{ fetching: live.fetching, error: live.error, lastSync: live.lastSync, signedOut }}
@@ -423,12 +459,13 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
               {page.files.map((file, i) => (
                 <FileSection key={file.path} file={file} index={i + 1} view={viewChoices[file.path]} onViewChange={(path, view) => setViewChoices((v) => ({ ...v, [path]: view }))} />
               ))}
-              <Conversation items={activity.conversation} fresh={seenState.fresh} hideBots={hideBots} onPost={postConversation} />
+              <Conversation items={activity.conversation} fresh={seenState.fresh} hideBots={hideBots} onPost={postConversation} onEdit={editConversation} />
             </main>
             <Margin
               docRef={docRef} engineRef={engineRef} onResolve={resolve}
+              onEdit={(c, body) => editComment(`comments/${c.id}`, body)}
               renderReply={(t) => (
-                <ReplyBox pr={pr} threadId={t.id} onSubmit={(body) => postReply(t, body)}
+                <ReplyBox pr={pr} threadId={t.id} mentions onSubmit={(body) => postReply(t, body)}
                   onFocus={() => { if (store.getState().active !== t.id) activate(t.id); }} />
               )}
               claude={{ threads: claudeList, lives, onFollowUp: followUp, onDelete: deleteClaude }}
@@ -449,6 +486,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       </div>
       <FinishReview open={reviewOpen} onClose={() => setReviewOpen(false)} onSubmit={submitReview} />
       <SelectionButton selection={selection} claude={page.claude} onComment={() => commentOnSelection("comment")} />
+    </MentionsCtx.Provider>
     </ReviewPageCtx.Provider>
   );
 }

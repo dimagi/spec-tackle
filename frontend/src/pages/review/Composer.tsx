@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { request } from "../../api/request";
+import { MentionTextarea } from "../../components/MentionTextarea";
 import type { PageFile } from "../../api/types";
 import { commentableRange, quoteFor, rangeLabel } from "../../lib/threads";
 import type { ComposerMode, ComposerTarget } from "../../state/review";
@@ -121,9 +122,9 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
             <button className={preview !== null ? "on" : ""} onClick={showPreview}>Preview</button>
           </div>
         )}
-        <textarea
+        <MentionTextarea
           ref={textarea} rows={4} className="field" value={text} placeholder={m.placeholder} hidden={preview !== null}
-          onChange={(e) => setText(e.target.value)}
+          mentions={mode === "comment"} onValueChange={setText}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
