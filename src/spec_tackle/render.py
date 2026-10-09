@@ -331,6 +331,7 @@ def normalize_activity(data: dict) -> dict:
                 "bodyHTML": c["bodyHTML"],
                 "createdAt": c["createdAt"],
                 "url": c["url"],
+                "canEdit": bool(c.get("viewerCanUpdate")),
             }
             for c in node["comments"]["nodes"]
         ]
@@ -362,6 +363,7 @@ def normalize_activity(data: dict) -> dict:
             "bodyHTML": c["bodyHTML"],
             "createdAt": c["createdAt"],
             "url": c["url"],
+            "canEdit": bool(c.get("viewerCanUpdate")),
         }
         for c in data["comments"]["nodes"]
     ]
@@ -379,6 +381,7 @@ def normalize_activity(data: dict) -> dict:
                 "bodyHTML": review["bodyHTML"] if has_body else "",
                 "createdAt": review["submittedAt"],
                 "url": review["url"],
+                "canEdit": bool(review.get("viewerCanUpdate")),
             }
         )
     conversation.sort(key=lambda item: item["createdAt"] or "")

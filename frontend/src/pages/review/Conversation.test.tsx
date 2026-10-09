@@ -5,7 +5,7 @@ import { Conversation } from "./Conversation";
 
 const item = (over: Partial<ConversationItem> = {}): ConversationItem => ({
   kind: "comment", id: 1, author: { login: "ann", avatarUrl: "", isBot: false }, body: "", bodyHTML: "<p>Looks good</p>",
-  createdAt: "2026-10-08T10:00:00Z", url: "https://github.com/c/1", ...over,
+  createdAt: "2026-10-08T10:00:00Z", url: "https://github.com/c/1", canEdit: false, ...over,
 });
 
 test("lists comments and reviews with their verdicts", () => {
@@ -34,4 +34,20 @@ test("links in comments open in a new tab", () => {
   const link = screen.getByRole("link", { name: "this" });
   expect(link).toHaveAttribute("target", "_blank");
   expect(link).toHaveAttribute("rel", "noopener");
+});
+
+test("your own comments and reviews can be edited", async () => {
+  const onEdit = vi.fn(async () => {});
+  const review = item({ id: 2, kind: "review", state: "APPROVED", body: "Ship it", canEdit: true });
+  render(<Conversation items={[item(), review]} fresh={new Set()} hideBots={false} onPost={vi.fn()} onEdit={onEdit} />);
+
+  const menus = screen.getAllByRole("button", { name: "Comment options" });
+  await userEvent.click(menus[0]);
+  expect(screen.queryByRole("menuitem", { name: "Edit" })).not.toBeInTheDocument();
+  await userEvent.click(menus[1]);
+  await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  await userEvent.type(screen.getByRole("textbox", { name: "Edit comment" }), "!");
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(onEdit).toHaveBeenCalledWith(review, "Ship it!");
 });

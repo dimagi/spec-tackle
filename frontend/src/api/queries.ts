@@ -89,10 +89,11 @@ export function useRepos(query: string, enabled = true) {
   });
 }
 
-export function useOpenPulls(owner: string, repo: string) {
+export function useOpenPulls(owner: string, repo: string, enabled = true) {
   return useQuery({
     queryKey: ["pulls", owner, repo],
     queryFn: () => request<PrSummary[]>("GET", `/api/repos/${owner}/${repo}/pulls`),
+    enabled,
     staleTime: 60_000,
   });
 }

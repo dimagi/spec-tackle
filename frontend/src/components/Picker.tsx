@@ -65,6 +65,8 @@ export function PrRow({ pr }: { pr: PrSummary }) {
       <div className="flex items-center gap-2 text-xs text-stone-500">
         <span className="font-mono">{pr.owner}/{pr.repo} #{pr.number}</span>
         {pr.isDraft && <span className="rounded bg-stone-200 px-1.5 text-[10px] font-semibold uppercase dark:bg-stone-700">draft</span>}
+        {pr.review === "approved" && <span className="rounded bg-emerald-100 px-1.5 text-[10px] font-semibold uppercase text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300">approved</span>}
+        {pr.review === "changes_requested" && <span className="rounded bg-rose-100 px-1.5 text-[10px] font-semibold uppercase text-rose-800 dark:bg-rose-500/15 dark:text-rose-300">changes requested</span>}
       </div>
       <div className="truncate font-medium">{pr.title}</div>
       <div className="text-xs text-stone-500">{pr.author ?? "ghost"} · updated <RelativeTime iso={pr.updatedAt} /></div>

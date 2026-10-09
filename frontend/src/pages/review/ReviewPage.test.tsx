@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Page } from "../../api/types";
-import { makePage } from "../../test/fixtures";
+import { makeActivity, makePage, makeThread } from "../../test/fixtures";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { ReviewPage } from "./ReviewPage";
 
@@ -68,4 +68,33 @@ test("without Claude there are no page tabs", async () => {
   renderReview(makePage({ claude: false }));
   expect(await screen.findByText("Add spec", { selector: "h1 button *, h1 button" })).toBeInTheDocument();
   expect(screen.queryByRole("tablist")).toBeNull();
+});
+
+test("a thread enlarges over the page; Escape or the backdrop puts it back, and j moves to the next thread", async () => {
+  const second = makeThread({ id: "T2", line: 3 });
+  second.comments = [{ ...second.comments[0], id: 102, body: "And this?", bodyHTML: "<p>And this?</p>" }];
+  Element.prototype.scrollIntoView ??= () => {}; // j scrolls to the thread; jsdom has no layout
+  renderReview(makePage({ activity: makeActivity({ threads: [makeThread(), second] }) }));
+  const card = (id: string) => document.querySelector(`[data-card="${id}"]`)!;
+
+  await userEvent.click((await screen.findAllByRole("button", { name: "Enlarge thread" }))[0]);
+  expect(card("T1")).toHaveClass("is-enlarged");
+  expect(screen.getByRole("dialog", { name: "Comment thread" })).toBe(card("T1"));
+  expect(document.body).toHaveClass("has-enlarged");
+
+  await userEvent.keyboard("j");
+  expect(card("T1")).not.toHaveClass("is-enlarged");
+  expect(card("T2")).toHaveClass("is-enlarged");
+
+  await userEvent.keyboard("{Escape}");
+  expect(card("T2")).not.toHaveClass("is-enlarged");
+  expect(document.body).not.toHaveClass("has-enlarged");
+
+  await userEvent.click(within(card("T2") as HTMLElement).getByRole("button", { name: "Enlarge thread" }));
+  await userEvent.click(screen.getByTestId("enlarge-backdrop"));
+  expect(card("T2")).not.toHaveClass("is-enlarged");
+
+  await userEvent.click(within(card("T2") as HTMLElement).getByRole("button", { name: "Enlarge thread" }));
+  await userEvent.click(within(card("T2") as HTMLElement).getByRole("button", { name: "Shrink thread" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

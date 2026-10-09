@@ -73,7 +73,8 @@ def test_open_pulls_lists_a_repos_open_prs(monkeypatch):
     assert seen["variables"] == {"owner": "o", "repo": "r"}
     assert "states: OPEN" in seen["query"]
     assert result == [{"owner": "o", "repo": "r", "number": 5, "title": "Spec", "author": None,
-                       "updatedAt": "2026-10-07T00:00:00Z", "isDraft": True, "url": "https://github.com/o/r/pull/5"}]
+                       "updatedAt": "2026-10-07T00:00:00Z", "isDraft": True, "url": "https://github.com/o/r/pull/5",
+                       "review": "pending"}]
 
 
 def test_open_pulls_of_a_missing_repo_is_a_404(monkeypatch):

@@ -2,7 +2,7 @@ import type { Activity, Comment } from "../api/types";
 import { applyActivity, initialSeen } from "./activity";
 
 const comment = (id: number, login = "ann"): Comment => ({
-  id, author: { login, avatarUrl: "", isBot: false }, body: "", bodyHTML: "", createdAt: "", url: "",
+  id, author: { login, avatarUrl: "", isBot: false }, body: "", bodyHTML: "", createdAt: "", url: "", canEdit: false,
 });
 const activity = (comments: Comment[], { head = "abc", convo = [] as Comment[] } = {}): Activity => ({
   headSha: head, state: "OPEN", isDraft: false, viewer: { login: "me" },

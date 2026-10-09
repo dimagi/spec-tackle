@@ -5,7 +5,7 @@ const person = (isBot = false) => ({ login: isBot ? "ci[bot]" : "ann", avatarUrl
 const thread = (over: Partial<Thread> = {}): Thread => ({
   id: "T1", path: "a.md", line: 5, startLine: 3, originalLine: null, originalStartLine: null,
   isResolved: false, isOutdated: false, isFileLevel: false, side: "RIGHT", resolvedBy: null,
-  comments: [{ id: 1, author: person(), body: "", bodyHTML: "", createdAt: "", url: "" }],
+  comments: [{ id: 1, author: person(), body: "", bodyHTML: "", createdAt: "", url: "", canEdit: false }],
   ...over,
 });
 const file = (over: Partial<PageFile> = {}): PageFile => ({

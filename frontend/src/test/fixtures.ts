@@ -8,7 +8,7 @@ export function makeThread(over: Partial<Thread> = {}): Thread {
     isResolved: false, isOutdated: false, isFileLevel: false, side: "RIGHT", resolvedBy: null,
     comments: [{
       id: 101, author: { login: "ann", avatarUrl: "", isBot: false }, body: "Why?",
-      bodyHTML: "<p>Why?</p>", createdAt: "2026-10-08T10:00:00Z", url: "https://github.com/c/101",
+      bodyHTML: "<p>Why?</p>", createdAt: "2026-10-08T10:00:00Z", url: "https://github.com/c/101", canEdit: false,
     }],
     ...over,
   };
