@@ -3,8 +3,10 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useOpenPulls, useRepos } from "../../api/queries";
 import type { Repo } from "../../api/types";
 import { Option, PrRow, Status, useHighlight } from "../../components/Picker";
+import { HiddenByFilters, PrFilters } from "../../components/PrFilters";
 import { prPath } from "../../lib/prRef";
 import { useDebounced } from "../../lib/useDebounced";
+import { matchesPrFilters, usePrFilters } from "../../state/prFilters";
 import { recentRepos } from "../../state/recents";
 
 type RepoRef = { owner: string; repo: string };
@@ -114,8 +116,10 @@ function PullList({ repo, onBack }: { repo: RepoRef; onBack: () => void }) {
   const pulls = useOpenPulls(repo.owner, repo.repo);
   const [text, setText] = useState("");
   const needle = text.trim().toLowerCase();
-  const rows = (pulls.data ?? []).filter((p) =>
+  const filters = usePrFilters();
+  const found = (pulls.data ?? []).filter((p) =>
     !needle || `#${p.number} ${p.title} ${p.author ?? ""}`.toLowerCase().includes(needle));
+  const rows = found.filter((p) => matchesPrFilters(p, filters));
   const { highlight, setHighlight, move } = useHighlight(rows.length);
 
   let status: ReactNode = null;
@@ -127,7 +131,8 @@ function PullList({ repo, onBack }: { repo: RepoRef; onBack: () => void }) {
     </Status>
   );
   else if (!pulls.data.length) status = <Status>No open pull requests</Status>;
-  else if (!rows.length) status = <Status>No matches</Status>;
+  else if (!found.length) status = <Status>No matches</Status>;
+  else status = <HiddenByFilters count={found.length - rows.length} shown={rows.length} />;
 
   return (
     <>
@@ -145,6 +150,7 @@ function PullList({ repo, onBack }: { repo: RepoRef; onBack: () => void }) {
           if (e.key === "Enter" && rows[highlight]) { e.preventDefault(); navigate(prPath(rows[highlight])); }
         }}
       />
+      <PrFilters />
       <div role="listbox" aria-label="Open pull requests" className="mt-2 max-h-80 overflow-y-auto">
         {rows.map((p, i) => (
           <Option key={p.number} active={i === highlight} onPick={() => navigate(prPath(p))} onHover={() => setHighlight(i)}>

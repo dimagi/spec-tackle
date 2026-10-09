@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from spec_tackle.app import app
-from spec_tackle.github import GitHub, GitHubError
+from spec_tackle.github import GitHub, GitHubError, review_state
 
 
 def pull(number, updated, author="ann", draft=False):
@@ -33,9 +33,11 @@ def test_review_requests_flattens_search_results_newest_first(monkeypatch):
     assert "first: 20" in seen["query"]
     assert result == [
         {"owner": "o", "repo": "r", "number": 9, "title": "PR 9", "author": None,
-         "updatedAt": "2026-10-07T00:00:00Z", "isDraft": True, "url": "https://github.com/o/r/pull/9"},
+         "updatedAt": "2026-10-07T00:00:00Z", "isDraft": True, "url": "https://github.com/o/r/pull/9",
+         "review": "pending"},
         {"owner": "o", "repo": "r", "number": 3, "title": "PR 3", "author": "ann",
-         "updatedAt": "2026-10-01T00:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/3"},
+         "updatedAt": "2026-10-01T00:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/3",
+         "review": "pending"},
     ]
 
 
@@ -106,3 +108,21 @@ def test_review_requests_raises_when_search_failed_outright(monkeypatch):
             asyncio.run(client.review_requests())
     finally:
         asyncio.run(client.aclose())
+
+
+def reviews(*states):
+    return {"nodes": [{"state": s} for s in states]}
+
+
+@pytest.mark.parametrize("decision, latest, expected", [
+    ("APPROVED", reviews(), "approved"),
+    ("CHANGES_REQUESTED", reviews("APPROVED"), "changes_requested"),
+    ("REVIEW_REQUIRED", reviews("APPROVED"), "pending"),
+    # Repos that don't require reviews have no decision; go by each reviewer's latest verdict.
+    (None, reviews("APPROVED", "APPROVED"), "approved"),
+    (None, reviews("APPROVED", "CHANGES_REQUESTED"), "changes_requested"),
+    (None, reviews(), "pending"),
+    (None, None, "pending"),
+])
+def test_review_state(decision, latest, expected):
+    assert review_state({"reviewDecision": decision, "latestOpinionatedReviews": latest}) == expected

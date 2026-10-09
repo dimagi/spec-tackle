@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import type { PrSummary } from "../../api/types";
+import { usePrFilters } from "../../state/prFilters";
 import { loadRecents, recordRecent } from "../../state/recents";
 import { PrSwitcher } from "./PrSwitcher";
 
@@ -11,7 +12,7 @@ const CURRENT = { owner: "o", repo: "r", number: 7, title: "Add spec" };
 
 const req = (number: number, title: string, over: Partial<PrSummary> = {}): PrSummary => ({
   owner: "dimagi", repo: "app", number, title, author: "ann",
-  updatedAt: "2026-10-08T09:00:00Z", isDraft: false, url: `https://github.com/dimagi/app/pull/${number}`, ...over,
+  updatedAt: "2026-10-08T09:00:00Z", isDraft: false, review: "pending", url: `https://github.com/dimagi/app/pull/${number}`, ...over,
 });
 
 function respond(body: unknown, status = 200) {
@@ -44,6 +45,7 @@ function setup({ open = true, beforeLeave = () => true }: { open?: boolean; befo
 }
 
 beforeEach(() => {
+  usePrFilters.setState(usePrFilters.getInitialState());
   localStorage.clear();
   recordRecent({ owner: "x", repo: "y", number: 1, title: "Old one" });
   recordRecent({ owner: "dimagi", repo: "app", number: 3, title: "Sync queue" });
@@ -60,12 +62,17 @@ test("the title opens the dropdown with the input focused", async () => {
 });
 
 test("lists review requests, then recents not already listed, with the current PR marked", async () => {
-  respond([req(3, "Sync queue"), req(4, "Draft thing", { isDraft: true })]);
+  respond([req(3, "Sync queue"), req(4, "Draft thing", { isDraft: true }), req(5, "Signed off", { review: "approved" })]);
   setup();
   const requested = within(screen.getByRole("group", { name: "Review requested" }));
   expect(await requested.findByText("Sync queue")).toBeInTheDocument();
+  expect(requested.queryByText("Draft thing")).toBeNull();
+  expect(requested.getByText("2 pull requests more hidden by the filters")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Draft" }));
+  await userEvent.click(screen.getByRole("button", { name: "Approved" }));
   expect(requested.getByText("Draft thing")).toBeInTheDocument();
   expect(requested.getByText("draft")).toBeInTheDocument();
+  expect(requested.getByText("Signed off")).toBeInTheDocument();
 
   const recent = within(screen.getByRole("group", { name: "Recent" }));
   expect(recent.getByText("Add spec")).toBeInTheDocument();

@@ -79,11 +79,11 @@ class FakeGitHub:
 
     async def open_pulls(self, owner, repo):
         return [{"owner": owner, "repo": repo, "number": 8, "title": "Next spec", "author": "ann",
-                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": f"https://github.com/{owner}/{repo}/pull/8"}]
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "review": "pending", "url": f"https://github.com/{owner}/{repo}/pull/8"}]
 
     async def review_requests(self):
         return [{"owner": "o", "repo": "r", "number": 8, "title": "Next spec", "author": "ann",
-                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "review": "pending", "url": "https://github.com/o/r/pull/8"}]
 
     async def mentionable_users(self, pr, query):
         self.mention_queries = [*getattr(self, "mention_queries", []), query]

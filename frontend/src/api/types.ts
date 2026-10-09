@@ -65,7 +65,11 @@ export type PRInfo = { owner: string; repo: string; number: number; url: string 
 export type PrSummary = {
   owner: string; repo: string; number: number; title: string;
   author: string | null; updatedAt: string; isDraft: boolean; url: string;
+  review: ReviewState;
 };
+
+/** Where a PR's reviews stand: GitHub's decision, or each reviewer's latest verdict. */
+export type ReviewState = "approved" | "changes_requested" | "pending";
 
 export type Repo = {
   owner: string; repo: string; description: string | null;

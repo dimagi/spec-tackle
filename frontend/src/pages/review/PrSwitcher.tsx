@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useReviewRequests } from "../../api/queries";
 import { Option, PrRow, Section, Status, useHighlight } from "../../components/Picker";
+import { HiddenByFilters, PrFilters } from "../../components/PrFilters";
 import { parsePrRef, prPath, samePr } from "../../lib/prRef";
+import { matchesPrFilters, usePrFilters } from "../../state/prFilters";
 import { loadRecents, removeRecent, type RecentPr } from "../../state/recents";
 import type { PRRef } from "../../state/storage";
 
@@ -28,7 +30,10 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
   const matches = (pr: PRRef, title: string) =>
     !query || `${pr.owner}/${pr.repo} #${pr.number} ${title}`.toLowerCase().includes(query);
   const queue = requests.data ?? [];
-  const requested = queue.filter((r) => matches(r, r.title));
+  const filters = usePrFilters();
+  const found = queue.filter((r) => matches(r, r.title));
+  const requested = found.filter((r) => matchesPrFilters(r, filters));
+  const hidden = found.length - requested.length;
   const recent = recents.filter((r) => !queue.some((q) => samePr(q, r)) && matches(r, r.title));
   const rows: PRRef[] = [...requested, ...recent];
   const { highlight, setHighlight, move } = useHighlight(rows.length);
@@ -81,8 +86,13 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
     </Status>
   );
   else if (!queue.length) queueBody = <Status>Nothing waiting on you</Status>;
-  else if (!requested.length) queueBody = <Status>No matches</Status>;
-  else queueBody = requested.map((r, i) => option(r, i, <PrRow pr={r} />));
+  else if (!found.length) queueBody = <Status>No matches</Status>;
+  else queueBody = (
+    <>
+      {requested.map((r, i) => option(r, i, <PrRow pr={r} />))}
+      <HiddenByFilters count={hidden} shown={requested.length} />
+    </>
+  );
 
   return (
     <div ref={rootRef} className="relative min-w-0">
@@ -102,6 +112,7 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
             aria-label="Pull request link or filter" placeholder="Paste a PR link or owner/repo#123, or type to filter"
             className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none ring-amber-400/40 placeholder:text-stone-400 focus:border-amber-500 focus:ring-4 dark:border-stone-700 dark:bg-stone-950"
           />
+          <PrFilters />
           {error && <p role="alert" className="px-2 pt-1 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
           <div role="listbox" aria-label="Pull requests" className="mt-2 max-h-[60vh] overflow-y-auto">
             <Section title="Review requested">{queueBody}</Section>
