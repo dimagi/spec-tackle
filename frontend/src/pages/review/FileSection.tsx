@@ -50,13 +50,13 @@ export function FileSection({ file, index, view: chosen, onViewChange, refs }: P
         <span className={`status-pill status-${file.status}`}>{file.status}</span>
         <span className="font-mono text-xs text-emerald-600">+{file.additions}</span>
         <span className="font-mono text-xs text-rose-600">−{file.deletions}</span>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex min-w-0 items-center gap-3">
           {refs && file.rendered && (
             <DocRefs pr={refs.pr} path={file.path} head={refs.head} auto={refs.auto}
               active={view === "rendered"} section={sectionRef} />
           )}
           {toggle && (
-            <div className="flex rounded-lg bg-stone-200/70 p-0.5 text-xs font-medium dark:bg-stone-800">
+            <div className="flex shrink-0 rounded-lg bg-stone-200/70 p-0.5 text-xs font-medium dark:bg-stone-800">
               <button className={`seg view-toggle ${view === "rendered" ? "on" : ""}`} data-view="rendered" onClick={() => pick("rendered")}>Document</button>
               <button className={`seg view-toggle ${view === "diff" ? "on" : ""}`} data-view="diff" onClick={() => pick("diff")}>Changes</button>
             </div>

@@ -200,8 +200,9 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
   let control;
   if (running) {
     control = (
-      <span className="flex items-center gap-2 text-xs text-stone-500" role="status">
-        <span className="spinner" aria-hidden="true" />{progress}
+      <span className="flex min-w-0 items-center gap-2 text-xs text-stone-500" role="status">
+        <span className="spinner shrink-0" aria-hidden="true" />
+        <span className="truncate" title={progress}>{progress}</span>
       </span>
     );
   } else if (current) {
@@ -244,7 +245,7 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
 
   return (
     <>
-      <div className="flex items-center gap-1.5">{control}</div>
+      <div className="flex min-w-0 items-center gap-1.5">{control}</div>
       {popup && createPortal(
         <RefPopup popup={popup} path={path} view={view()} onEnter={() => clearTimeout(timer.current)}
           onLeave={() => hideSoon(timer, setPopup)} />,
