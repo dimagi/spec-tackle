@@ -1,10 +1,10 @@
 /** The Logic map as a React Flow chart, laid out by ELK. Loaded lazily with the Logic view's map. */
 import {
-  Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow,
-  type Edge, type NodeProps,
+  applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow,
+  type Edge, type NodeChange, type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicBlock, LogicKind } from "../../api/types";
 import { layoutFlow, type FlowNode } from "../../lib/logicFlow";
 
@@ -50,10 +50,8 @@ function useActivate(block: LogicBlock) {
   return {
     selected: selected === block.id,
     props: {
-      // React Flow turns off pointer events on nodes it sees as inert (not selectable or draggable);
-      // the card handles its own clicks, so it opts back in. Its "nopan" class keeps a click from
-      // starting a pan; drag the background to pan.
-      style: { pointerEvents: "auto" as const },
+      // Dragging a card moves it (React Flow swallows the click that ends a drag); its "nopan"
+      // class keeps a drag from panning the chart. Drag the background to pan.
       role: "button",
       tabIndex: 0,
       "data-block": block.id,
@@ -139,6 +137,11 @@ function Flow({ blocks, expanded, onFailed }: Pick<Props, "blocks" | "expanded" 
     return () => { cancelled = true; };
   }, [blocks, expanded, fitView, activated]);
 
+  // Dragged blocks keep their place until the next layout (expanding or collapsing a block).
+  const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
+    setGraph((g) => g && { ...g, nodes: applyNodeChanges(changes, g.nodes) });
+  }, []);
+
   const edges = useMemo(() => (graph?.edges ?? []).map((e) => ({
     ...e,
     markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
@@ -150,7 +153,7 @@ function Flow({ blocks, expanded, onFailed }: Pick<Props, "blocks" | "expanded" 
   return (
     <ReactFlow
       nodes={graph?.nodes ?? []} edges={edges} nodeTypes={nodeTypes} colorMode={useDarkMode() ? "dark" : "light"}
-      nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} elementsSelectable={false}
+      onNodesChange={onNodesChange} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} elementsSelectable={false}
       minZoom={0.2} fitView fitViewOptions={FIT}
     >
       <Background gap={20} size={1} />
