@@ -115,15 +115,24 @@ class FakeCheckouts:
     def __init__(self, root: Path):
         self.root = root
         self.calls = []
+        self.files: dict[str, dict[str, str]] = {}  # per commit: path -> text, over the defaults
+        self.gone: set[str] = set()  # commits that were force-pushed away
 
     def has_clone(self, *, owner, repo):
         return bool(self.calls)
 
     async def worktree(self, *, owner, repo, sha, token):
+        from spec_tackle.checkout import CommitGone
+        if sha in self.gone:
+            raise CommitGone("gone")
         self.calls.append(sha)
         path = self.root / sha
         (path / "docs").mkdir(parents=True, exist_ok=True)
         (path / "docs" / "a.md").write_text("one\ntwo\nthree\nfour\n")
+        (path / "app").mkdir(exist_ok=True)
+        (path / "app" / "codes.py").write_text("OK = 0\nRETRY = 4012\nGIVE_UP = 4013\n")
+        for name, text in self.files.get(sha, {}).items():
+            (path / name).write_text(text)
         return path
 
 

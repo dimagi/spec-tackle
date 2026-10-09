@@ -81,7 +81,7 @@ def test_migrates_an_old_database(tmp_path):
     s = Store.open(path)
     assert s.threads_for_pr(login="me", pr=PR) == []
     s.close()
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (3,)
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (5,)
     s = Store.open(path)
     assert s.latest_logic_map(login="me", pr=PR) is None
     s.close()
@@ -133,3 +133,22 @@ def test_logic_maps_are_private_to_their_login(store):
     map_id = _save_map(store)
     assert store.logic_map(login="someone", map_id=map_id) is None
     assert store.latest_logic_map(login="someone", pr=PR) is None
+
+
+REFS = [{"line": 3, "text": "Limits", "targetStart": 7, "targetEnd": 9, "note": "Limits"}]
+
+
+def test_doc_refs_round_trip_per_path(store):
+    refs_id = store.save_doc_refs(login="me", pr=PR, path="docs/a.md", head_sha="abc", refs=REFS)
+    saved = store.latest_doc_refs(login="me", pr=PR, path="docs/a.md")
+    assert saved["id"] == refs_id and saved["headSha"] == "abc" and saved["refs"] == REFS
+    assert saved["path"] == "docs/a.md"
+    assert store.latest_doc_refs(login="me", pr=PR, path="docs/b.md") is None
+    assert store.latest_doc_refs(login="someone", pr=PR, path="docs/a.md") is None
+
+
+def test_regenerating_doc_refs_for_the_same_commit_replaces_them(store):
+    store.save_doc_refs(login="me", pr=PR, path="docs/a.md", head_sha="abc", refs=REFS)
+    store.save_doc_refs(login="me", pr=PR, path="docs/a.md", head_sha="abc", refs=[])
+    assert store.latest_doc_refs(login="me", pr=PR, path="docs/a.md")["refs"] == []
+    assert store._db.execute("SELECT COUNT(*) FROM doc_refs").fetchone()[0] == 1
