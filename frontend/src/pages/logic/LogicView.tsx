@@ -1,11 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { apiBase, logicKey, useLogic } from "../../api/queries";
 import { request } from "../../api/request";
 import type { LogicBlock, LogicMap, LogicState } from "../../api/types";
-import { allParentIds, toMermaid, type MermaidChart } from "../../lib/logicMermaid";
+import { allParentIds } from "../../lib/logicFlow";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 import { FunctionPanel } from "./FunctionPanel";
+
+// React Flow and ELK load only when a map is shown.
+const FlowChart = lazy(() => import("./FlowChart"));
 
 type Props = {
   pr: PRRef;
@@ -140,7 +143,8 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
     () => new Set(loadPref<string[]>(pr, "logicExpanded", []).filter((id) => parents.has(id))),
   );
   const [selected, setSelected] = useState<LogicBlock | null>(null);
-  const chart = useMemo(() => toMermaid(map.blocks, expanded), [map.blocks, expanded]);
+  // ELK couldn't lay the map out: show it as a list instead.
+  const [failed, setFailed] = useState(false);
 
   const setOpen = (next: Set<string>) => {
     setExpanded(next);
@@ -176,8 +180,17 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
             <button type="button" className="nav-btn" onClick={() => setOpen(new Set())}>Collapse all</button>
           </span>
         </div>
-        <Chart chart={chart} selected={selected?.id ?? null} onActivate={activate}
-          fallback={<BlockList blocks={map.blocks} expanded={expanded} onActivate={activate} />} />
+        {failed ? (
+          <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+            <p className="mb-3 text-xs text-stone-500">The flowchart couldn't be laid out, so here it is as a list.</p>
+            <BlockList blocks={map.blocks} expanded={expanded} onActivate={activate} />
+          </div>
+        ) : (
+          <Suspense fallback={<div className="mt-4 h-[72vh] animate-pulse rounded-xl bg-stone-100 dark:bg-stone-900" />}>
+            <FlowChart blocks={map.blocks} expanded={expanded} selected={selected?.id ?? null}
+              onActivate={activate} onFailed={() => setFailed(true)} />
+          </Suspense>
+        )}
       </div>
       {selected && (
         <FunctionPanel pr={pr} mapId={map.id} block={selected} headSha={map.headSha}
@@ -198,112 +211,12 @@ function Legend() {
       {swatch("unchanged", "Unchanged context")}
       <span>⊕ has finer steps: Ctrl-click (⌘ on Mac) to expand</span>
       <span>◇ decision · ↻ loop · ⚡ async</span>
+      <span className="flex items-center gap-1.5"><span className="logic-swatch exit" />red outline: exit (where the flow ends)</span>
     </span>
   );
 }
 
-let renderCount = 0;
-const NODE_ID = /(?:^|-)(n\d+)(?:-|$)/;
-const CLUSTER_ID = /(?:^|-)(c\d+)$/;
-
-type ChartProps = {
-  chart: MermaidChart;
-  selected: string | null;
-  onActivate: (block: LogicBlock, expand: boolean) => void;
-  fallback: React.ReactNode;
-};
-
-/** The flowchart, drawn by Mermaid, with its nodes made clickable and focusable. */
-function Chart({ chart, selected, onActivate, fallback }: ChartProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [failed, setFailed] = useState(false);
-  const activate = useRef(onActivate);
-  activate.current = onActivate;
-  // The block last activated from the keyboard gets focus back after a redraw.
-  const refocus = useRef<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const draw = async () => {
-      try {
-        const { default: mermaid } = await import("mermaid");
-        const dark = document.documentElement.classList.contains("dark");
-        mermaid.initialize({
-          startOnLoad: false, theme: dark ? "dark" : "neutral", securityLevel: "strict",
-          // The default (200px) wraps subgraph titles onto a second line that the box doesn't make room for.
-          flowchart: { wrappingWidth: 360 },
-        });
-        const { svg } = await mermaid.render(`logic-chart-${++renderCount}`, chart.source);
-        if (cancelled || !ref.current) return;
-        ref.current.innerHTML = svg;
-        wire(ref.current);
-        setFailed(false);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    };
-    const wire = (root: HTMLElement) => {
-      const hook = (el: Element, block: LogicBlock, label: string) => {
-        el.setAttribute("tabindex", "0");
-        el.setAttribute("role", "button");
-        el.setAttribute("aria-label", label);
-        el.classList.add("logic-hit");
-        // A hover tooltip: SVG shows a <title> child.
-        const tip = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        tip.textContent = label;
-        el.prepend(tip);
-        const go = (e: MouseEvent | KeyboardEvent) => {
-          refocus.current = block.id;
-          activate.current(block, e.ctrlKey || e.metaKey);
-        };
-        el.addEventListener("click", (e) => go(e as MouseEvent));
-        el.addEventListener("keydown", (e) => {
-          const key = (e as KeyboardEvent).key;
-          if (key === "Enter" || key === " ") { e.preventDefault(); go(e as KeyboardEvent); }
-        });
-        if (refocus.current === block.id) (el as HTMLElement).focus();
-      };
-      root.querySelectorAll("g.node").forEach((el) => {
-        const block = chart.nodes.get(NODE_ID.exec(el.id)?.[1] ?? "");
-        if (!block) return;
-        const more = block.children?.length;
-        hook(el, block, `${block.label}${more ? " ⊕" : ""}: ${block.kind}, show its code${more ? "; Ctrl-click to expand" : ""}`);
-      });
-      root.querySelectorAll("g.cluster").forEach((el) => {
-        const block = chart.clusters.get(CLUSTER_ID.exec(el.id)?.[1] ?? "");
-        if (block) hook(el, block, `⊖ ${block.label}: show its code; Ctrl-click to collapse`);
-      });
-    };
-    window.addEventListener("spec-tackle:theme", draw);
-    draw();
-    return () => {
-      cancelled = true;
-      window.removeEventListener("spec-tackle:theme", draw);
-    };
-  }, [chart]);
-
-  useEffect(() => {
-    ref.current?.querySelectorAll(".logic-hit").forEach((el) => {
-      const node = chart.nodes.get(NODE_ID.exec(el.id)?.[1] ?? "");
-      const cluster = chart.clusters.get(CLUSTER_ID.exec(el.id)?.[1] ?? "");
-      el.classList.toggle("is-selected", (node ?? cluster)?.id === selected);
-    });
-  }, [selected, chart]);
-
-  return (
-    <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
-      <div ref={ref} className="logic-chart overflow-x-auto" hidden={failed} />
-      {failed && (
-        <>
-          <p className="mb-3 text-xs text-stone-500">The flowchart couldn't be drawn, so here it is as a list.</p>
-          {fallback}
-        </>
-      )}
-    </div>
-  );
-}
-
-/** The map as a nested list: shown when Mermaid can't draw it. */
+/** The map as a nested list: shown when ELK can't lay it out. */
 function BlockList({ blocks, expanded, onActivate, root = true }: {
   blocks: LogicBlock[]; expanded: Set<string>; onActivate: (b: LogicBlock, expand: boolean) => void; root?: boolean;
 }) {

@@ -390,17 +390,17 @@ html.dark .claude-error { color: #fca5a5; }
 .line-flash { animation: line-flash 2s ease-out; }
 @keyframes line-flash { 0%, 30% { background: rgba(251, 191, 36, .35); } 100% { background: transparent; } }
 
-.logic-chart svg { max-width: 100%; height: auto; margin: 0 auto; display: block; }
-.logic-hit { cursor: pointer; outline: none; }
-.logic-hit:hover > rect, .logic-hit:hover > polygon, .logic-hit:hover > path { filter: brightness(.96); }
-.logic-hit:focus-visible > rect, .logic-hit:focus-visible > polygon, .logic-hit:focus-visible > path,
-.logic-hit.is-selected > rect, .logic-hit.is-selected > polygon, .logic-hit.is-selected > path {
-  stroke: var(--claude) !important; stroke-width: 3px !important;
-}
+.logic-flow .logic-card, .logic-flow .logic-box { cursor: pointer; outline: none; transition: box-shadow .15s; }
+.logic-flow .logic-card:hover { box-shadow: 0 4px 14px rgba(28, 25, 23, .12); }
+.logic-flow .logic-card:focus-visible, .logic-flow .logic-box:focus-visible,
+.logic-flow .is-selected { box-shadow: 0 0 0 4px color-mix(in srgb, var(--claude) 45%, transparent); }
+/* Blocks glide to their new places when one is expanded or collapsed. */
+.logic-flow .react-flow__node { transition: transform .25s ease; }
 .logic-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid; }
 .logic-swatch.added { background: #d1fae5; border-color: #059669; }
 .logic-swatch.changed { background: #fef3c7; border-color: #d97706; }
 .logic-swatch.unchanged { background: #f5f5f4; border-color: #a8a29e; }
+.logic-swatch.exit { background: transparent; border: 2px solid #f43f5e; }
 
 .logic-code { margin: 0; overflow-x: auto; border-radius: .5rem; border: 1px solid var(--paper-border); background: var(--code-bg); font-size: 12px; line-height: 1.6; padding: .25rem 0; }
 .logic-line { display: flex; white-space: pre; padding-right: .75rem; }
