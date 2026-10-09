@@ -342,6 +342,17 @@ kbd { font: 500 10px "JetBrains Mono", monospace; padding: 0 4px; border-radius:
 .outline-link:hover { color: var(--ink); background: rgba(120,113,108,.08); }
 .outline-link.on { color: var(--ink); background: rgba(251,191,36,.18); font-weight: 500; }
 .outline-link.tree-dir { justify-content: flex-start; text-align: left; }
+.rail-resizer {
+  position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; z-index: 20;
+  cursor: col-resize; touch-action: none;
+}
+.rail-resizer::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+  background: transparent; transition: background .15s;
+}
+.rail-resizer:hover::after, .rail-resizer:focus-visible::after, .resizing-rail .rail-resizer::after { background: #f59e0b; }
+.rail-resizer:focus-visible { outline: none; }
+body.resizing-rail { cursor: col-resize; user-select: none; }
 .file-status {
   display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid currentColor;
