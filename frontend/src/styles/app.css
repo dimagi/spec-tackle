@@ -438,6 +438,24 @@ html.dark .claude-error { color: #fca5a5; }
 .spinner { display: inline-block; width: 10px; height: 10px; border-radius: 999px; border: 2px solid var(--claude); border-right-color: transparent; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* -- Cross-references in a document --------------------------------------- */
+
+.view .doc-ref { text-decoration: underline dotted var(--claude); text-decoration-thickness: 1.5px; text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
+.view .doc-ref:hover, .view .doc-ref:focus-visible { background: var(--claude-soft); outline: none; }
+.doc-ref-popup { position: fixed; z-index: 60; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--card-border); border-top: 3px solid var(--claude); border-radius: 10px; background: var(--card); color: var(--ink); box-shadow: 0 12px 32px rgba(28, 25, 23, .18); }
+.doc-ref-popup-head { display: flex; gap: 8px; align-items: baseline; padding: 6px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--card-border); }
+.doc-ref-popup-body { overflow-y: auto; padding: 4px 12px 8px; }
+.doc-ref-popup-body > :first-child { margin-top: .5em; }
+/* A reference to another file gets a small arrow, so it's clear the target lives elsewhere. */
+.view .doc-ref.is-external::after { content: "↗"; margin-left: 1px; font-size: .7em; vertical-align: super; color: var(--claude); }
+.doc-ref-popup-body .logic-code { margin: 6px 0; }
+.doc-ref-popup-note { padding: 6px 12px; font-size: 12px; color: var(--muted); }
+/* The top bar's per-PR "Auto-find references" switch. */
+.auto-refs-track { position: relative; display: inline-block; width: 26px; height: 15px; border-radius: 999px; background: rgba(120,113,108,.35); transition: background .15s; }
+.auto-refs-track > span { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.auto-refs[aria-checked="true"] .auto-refs-track { background: var(--claude); }
+.auto-refs[aria-checked="true"] .auto-refs-track > span { transform: translateX(11px); }
+
 /* -- Logic view ------------------------------------------------------------ */
 
 .line-flash { animation: line-flash 2s ease-out; }
