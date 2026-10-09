@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from spec_tackle import app as web, claude_api
+from spec_tackle.access import COOKIE, Access
 from spec_tackle.app import app
 from spec_tackle.claude import Event
 from spec_tackle.store import Store
@@ -15,6 +16,21 @@ from spec_tackle.turns import TurnRunner
 def allow_test_host(monkeypatch):
     """TestClient sends `Host: testserver`."""
     monkeypatch.setattr(web, "allowed_hosts", {"localhost", "testserver"})
+
+
+TEST_SECRET = "test-secret"
+
+
+@pytest.fixture(autouse=True)
+def known_access(monkeypatch):
+    """A fixed secret, so `signed_client()` can carry the cookie the launch link would set."""
+    monkeypatch.setattr(web, "_access", Access(TEST_SECRET))
+    return web._access
+
+
+def signed_client() -> TestClient:
+    """A TestClient that opened the launch link (has the access cookie)."""
+    return TestClient(app, cookies={COOKIE: TEST_SECRET})
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +150,7 @@ def claude_app(tmp_path, monkeypatch):
     """A TestClient with Claude enabled and GitHub, git and the SDK faked out."""
     fake_ask = FakeAsk()
     monkeypatch.setattr(claude_api.claude, "ask", fake_ask)
-    with TestClient(app) as client:
+    with signed_client() as client:
         app.state.session = FakeSession()
         app.state.store = Store.open(tmp_path / "state.db")
         app.state.claude_cli = "/usr/bin/claude"
@@ -147,7 +163,7 @@ def claude_app(tmp_path, monkeypatch):
 @pytest.fixture
 def web_app(tmp_path):
     """A TestClient signed in with a fake GitHub; Claude is off."""
-    with TestClient(app) as client:
+    with signed_client() as client:
         app.state.session = FakeSession()
         app.state.claude_cli = None
         yield client

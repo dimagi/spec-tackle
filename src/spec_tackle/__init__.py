@@ -1,6 +1,7 @@
 """spec-tackle: a reviewer-oriented reading view for GitHub pull requests."""
 
 import argparse
+import ipaddress
 import threading
 import webbrowser
 
@@ -36,9 +37,15 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"spec-tackle: {exc}\n")
 
-    from .app import allowed_hosts
+    from .app import access, allowed_hosts
 
     allowed_hosts.add(args.host.lower())
+    url += f"?key={access().launch_code()}"
+    if not _is_loopback(args.host):
+        print(
+            f"spec-tackle: warning: listening on {args.host}, not just this machine. Traffic is"
+            " unencrypted, so others on the network could read your PRs or the sign-in cookie."
+        )
 
     print(f"spec-tackle → {url}")
     if not args.no_browser:
@@ -50,3 +57,12 @@ def main() -> None:
         log_level="warning",
         timeout_graceful_shutdown=3,  # open answer streams would otherwise block Ctrl+C
     )
+
+
+def _is_loopback(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

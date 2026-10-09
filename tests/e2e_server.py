@@ -16,7 +16,8 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from spec_tackle import claude_api, logic  # noqa: E402
+from spec_tackle import app as web, claude_api, logic  # noqa: E402
+from spec_tackle.access import Access  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
 from spec_tackle.auth import NotSignedIn  # noqa: E402
 from spec_tackle.claude import Event  # noqa: E402
@@ -228,6 +229,8 @@ async def main():
     serving = asyncio.create_task(server.serve())
     while not server.started:
         await asyncio.sleep(0.05)
+    # frontend/playwright.config.ts gives the browser this cookie.
+    web._access = Access("e2e")
     app.state.session = FakeSession()
     app.state.store = Store.open(DATA / "state.db")
     app.state.claude_cli = "/fake/claude"

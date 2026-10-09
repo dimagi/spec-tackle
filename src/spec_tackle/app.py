@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import claude, claude_api, logic_api, pages, render
+from .access import Access, Gate
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
 from .github import GitHub, GitHubError, PRRef, parse_pr_url
@@ -23,6 +24,11 @@ from .turns import TurnRunner
 
 HERE = Path(__file__).parent
 SPA_SHELL = HERE / "static" / "dist" / "index.html"
+# Repo files /raw shows in the browser; anything else (HTML, XHTML, XML, ...) is a download.
+INLINE_RAW_TYPES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp",
+    "image/svg+xml", "image/vnd.microsoft.icon", "image/x-icon",
+}
 
 
 @asynccontextmanager
@@ -78,8 +84,20 @@ class HostCheck:
         await self.app(scope, receive, send)
 
 
+_access: Access | None = None
+
+
+def access() -> Access:
+    """Who may use the server; `main()` asks for it first, to print the launch link."""
+    global _access
+    if _access is None:
+        _access = Access.load()
+    return _access
+
+
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(HostCheck)
+app.add_middleware(Gate, access=lambda: access())
+app.add_middleware(HostCheck)  # added last, so it runs first
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 app.include_router(claude_api.router)
 app.include_router(logic_api.router)
@@ -133,14 +151,15 @@ async def raw(request: Request, owner: str, repo: str, ref: str, path: str):
     client = await gh(request)
     content = await client.raw_file(owner, repo, quote(path), ref)
     media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    if media_type in ("text/html", "image/svg+xml"):
-        # Never let repo content run script on our origin.
-        return Response(
-            content,
-            media_type=media_type,
-            headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"},
-        )
-    return Response(content, media_type=media_type)
+    # Never let repo content run script on our origin: a page anywhere can open this URL.
+    headers = {
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if media_type not in INLINE_RAW_TYPES:
+        media_type = "application/octet-stream"
+        headers["Content-Disposition"] = "attachment"
+    return Response(content, media_type=media_type, headers=headers)
 
 
 # -- API -------------------------------------------------------------------

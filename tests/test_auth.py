@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from spec_tackle import auth
+from spec_tackle.access import COOKIE
 from spec_tackle.app import app
 
 
@@ -46,9 +47,9 @@ def test_login_flow_reports_the_cli_error(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def signed_out(monkeypatch):
+def signed_out(monkeypatch, known_access):
     monkeypatch.setattr(auth, "find_token", lambda: None)
-    with TestClient(app) as client:
+    with TestClient(app, cookies={COOKIE: known_access.secret}) as client:
         yield client
 
 
