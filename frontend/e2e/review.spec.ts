@@ -79,6 +79,24 @@ test("mention someone in a reply, then edit the reply", async ({ page }) => {
   await expect(card.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
 });
 
+test("an enlarged thread's menu and mention list stay usable above the backdrop", async ({ page }) => {
+  await page.goto(PAGE);
+  const card = page.locator(".thread-card", { hasText: "How long is the backoff?" });
+  await card.getByRole("button", { name: "Enlarge thread" }).click();
+  await expect(card).toHaveClass(/is-enlarged/);
+
+  await card.getByRole("button", { name: "Comment options" }).click();
+  await card.getByRole("menuitem", { name: "Copy link" }).click();
+  await expect(card).toHaveClass(/is-enlarged/);
+
+  const reply = card.locator(".thread-reply textarea");
+  await reply.click();
+  await reply.pressSequentially("@b");
+  await card.getByRole("option", { name: /bob/ }).click();
+  await expect(reply).toHaveValue("@bob ");
+  await expect(card).toHaveClass(/is-enlarged/);
+});
+
 test("dark theme", async ({ page }) => {
   await page.goto(PAGE);
   await page.getByTitle("Dark").click();

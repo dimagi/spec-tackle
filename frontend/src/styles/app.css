@@ -288,6 +288,8 @@ body.has-enlarged { overflow: hidden; }
 .comment-menu > *:hover { background: rgba(120,113,108,.12); }
 /* Lift the card with an open menu or mention list above its neighbours in the margin. */
 .thread-card:has(.comment-menu, .mention-list) { z-index: 40; }
+/* ...but an enlarged card stays above its backdrop. */
+.thread-card.is-enlarged:has(.comment-menu, .mention-list) { z-index: 61; }
 .comment-editor { margin-top: 6px; }
 
 .mention-wrap { position: relative; }
