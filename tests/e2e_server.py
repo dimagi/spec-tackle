@@ -16,7 +16,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from spec_tackle import app as web, claude_api, logic  # noqa: E402
+from spec_tackle import app as web, claude_api, logic, refs  # noqa: E402
 from spec_tackle.access import Access  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
 from spec_tackle.auth import NotSignedIn  # noqa: E402
@@ -27,7 +27,7 @@ from spec_tackle.turns import TurnRunner  # noqa: E402
 PORT = 8799
 DATA = Path(tempfile.mkdtemp(prefix="spec-tackle-e2e-"))
 HEAD = "e2e0000headsha"
-DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff.\n\n## Limits\n\nAt most five tries.\n"
+DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff. See Limits below.\n\n## Limits\n\nAt most five tries.\n"
 ME = {"__typename": "User", "login": "me", "avatarUrl": ""}
 ANN = {"__typename": "User", "login": "ann", "avatarUrl": ""}
 TITLES = {7: "Retry failed form submissions", 8: "Rename the sync queue"}
@@ -179,6 +179,8 @@ class FakeCheckouts:
         path = DATA / "wt" / sha / "docs"
         path.mkdir(parents=True, exist_ok=True)
         (path / "retry.md").write_text(DOC)
+        (path.parent / "app").mkdir(exist_ok=True)
+        (path.parent / "app" / "retry.py").write_text("MAX_TRIES = 5\nBACKOFF_SECONDS = 1\n")
         return path.parent
 
 
@@ -201,12 +203,21 @@ LOGIC_MAP = {
 
 
 async def fake_ask(**kwargs):
-    """Claude, streaming a long answer over about 1.5 seconds; or a logic map, for the Logic view."""
+    """Claude, streaming a long answer over about 1.5 seconds; or a logic map or cross-references."""
     if kwargs.get("system") == logic.LOGIC_SYSTEM_PROMPT:
         yield Event(kind="tool", text="Reading docs/retry.md")
         await asyncio.sleep(0.3)
         answer = f"```json\n{json.dumps(LOGIC_MAP)}\n```"
         yield Event(kind="done", text=answer, session_id="e2e-logic")
+        return
+    if kwargs.get("system") == refs.REFS_SYSTEM_PROMPT:
+        await asyncio.sleep(0.3)
+        answer = json.dumps({"refs": [
+            {"line": 5, "text": "Limits", "targetStart": 7, "targetEnd": 9, "note": "Limits"},
+            {"line": 9, "text": "five tries", "targetPath": "app/retry.py", "targetStart": 1, "targetEnd": 1,
+             "note": "MAX_TRIES"},
+        ]})
+        yield Event(kind="done", text=f"```json\n{answer}\n```", session_id="e2e-refs")
         return
     yield Event(kind="tool", text="Reading docs/retry.md")
     for word in ANSWER.split(" "):
