@@ -34,7 +34,7 @@ uv run spec-tackle https://github.com/dimagi/commcare-connect/pull/1569/changes
 
 A plain `uv sync` removes the Claude extra, which turns Ask Claude off.
 
-Opens `http://127.0.0.1:8765`. It authenticates with `GITHUB_TOKEN`/`GH_TOKEN`, or falls back to `gh auth token`. If you're not signed in, the page offers **Sign in with GitHub** (via the GitHub CLI) or lets you paste a token.
+Opens `http://127.0.0.1:8765` through a one-time link (also printed in the terminal) that gives your browser an access cookie. Without it the server is locked, so other users on the machine, or other web pages, can't act on GitHub as you. The cookie lasts a year and survives restarts; for a new browser, restart spec-tackle and open the link it prints. It authenticates with `GITHUB_TOKEN`/`GH_TOKEN`, or falls back to `gh auth token`. If you're not signed in, the page offers **Sign in with GitHub** (via the GitHub CLI) or lets you paste a token.
 
 ## What you get
 
@@ -65,6 +65,7 @@ Working on the UI (needs Node 20+):
 cd frontend
 npm install
 npm run dev        # Vite on :5173, proxying the API to spec-tackle on :8765
+                   # (open spec-tackle's printed 127.0.0.1 link first for the cookie, then http://127.0.0.1:5173)
 npm test           # unit and component tests
 npm run e2e        # Playwright checks against a fake GitHub
 npm run build      # rebuild the committed bundle; `uv run pytest` fails if you forget

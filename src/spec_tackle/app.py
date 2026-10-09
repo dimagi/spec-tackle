@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import claude, claude_api, logic_api, pages, render
+from .access import Access, Gate
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
 from .github import GitHub, GitHubError, PRRef, parse_pr_url
@@ -83,8 +84,20 @@ class HostCheck:
         await self.app(scope, receive, send)
 
 
+_access: Access | None = None
+
+
+def access() -> Access:
+    """Who may use the server; `main()` asks for it first, to print the launch link."""
+    global _access
+    if _access is None:
+        _access = Access.load()
+    return _access
+
+
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(HostCheck)
+app.add_middleware(Gate, access=lambda: access())
+app.add_middleware(HostCheck)  # added last, so it runs first
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 app.include_router(claude_api.router)
 app.include_router(logic_api.router)
