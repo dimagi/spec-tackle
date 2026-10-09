@@ -1,5 +1,5 @@
 import type { LogicBlock } from "../api/types";
-import { allParentIds, cardSize, layoutFlow, toElkGraph } from "./logicFlow";
+import { allParentIds, cardSize, isTestBlock, isTestPath, layoutFlow, toElkGraph, withoutTests } from "./logicFlow";
 
 const block = (id: string, over: Partial<LogicBlock> = {}): LogicBlock => ({
   id, label: id, kind: "step", change: "unchanged", next: [], ...over,
@@ -59,4 +59,49 @@ test("Claude's ids are only React Flow ids, never markup", async () => {
 test("allParentIds lists every block that has children", () => {
   const nested = [block("a", { children: [block("b", { children: [block("c")] })] }), block("d")];
   expect(allParentIds(nested)).toEqual(["a", "b"]);
+});
+
+
+test.each([
+  "tests/test_views.py", "app/tests/helpers.py", "commcare_connect/program/test_views.py", "app/views_test.py",
+  "conftest.py", "src/lib/a.test.ts", "src/Card.spec.tsx", "src/__tests__/x.js", "frontend/e2e/logic.spec.ts",
+])("%s is a test file", (path) => {
+  expect(isTestPath(path)).toBe(true);
+});
+
+test.each(["app/views.py", "app/testing_utils_live.py", "docs/testing.md", "src/latest.ts", "contest/rules.py"])(
+  "%s is not a test file", (path) => {
+    expect(isTestPath(path)).toBe(false);
+  },
+);
+
+const fn = (path: string) => ({ path, symbol: "f", start: 1, end: 2 });
+
+test("a block is a test when all its functions, or all its steps, are tests, or its label says so", () => {
+  expect(isTestBlock(block("t", { functions: [fn("tests/test_a.py"), fn("app/test_b.py")] }))).toBe(true);
+  expect(isTestBlock(block("m", { functions: [fn("tests/test_a.py"), fn("app/views.py")] }))).toBe(false);
+  expect(isTestBlock(block("p", { children: [block("a", { functions: [fn("tests/test_a.py")] }), block("b", { label: "Tests: edge cases" })] }))).toBe(true);
+  expect(isTestBlock(block("q", { children: [block("a", { functions: [fn("tests/test_a.py")] }), block("b", { functions: [fn("app/x.py")] })] }))).toBe(false);
+  expect(isTestBlock(block("l", { label: "Test: admins land on the PM page" }))).toBe(true);
+  expect(isTestBlock(block("n", { label: "Testing mode toggles", functions: [fn("app/flags.py")] }))).toBe(false);
+  expect(isTestBlock(block("e", { label: "Render the page" }))).toBe(false);
+});
+
+test("withoutTests drops test blocks at every level, and the edges to and from them", () => {
+  const tree = [
+    block("t", { label: "Test: it works", next: [{ to: "a" }] }),
+    block("a", { next: [{ to: "b" }, { to: "t2" }], children: [block("c", { functions: [fn("app/x.py")] }), block("ct", { functions: [fn("tests/test_x.py")] })] }),
+    block("b"),
+    block("t2", { functions: [fn("tests/test_b.py")] }),
+  ];
+  const { blocks, hidden } = withoutTests(tree);
+  expect(hidden).toBe(3);
+  expect(blocks.map((b) => b.id)).toEqual(["a", "b"]);
+  expect(blocks[0].next).toEqual([{ to: "b" }]);
+  expect(blocks[0].children!.map((b) => b.id)).toEqual(["c"]);
+});
+
+test("a block whose steps are all tests goes entirely", () => {
+  const tree = [block("a"), block("p", { children: [block("x", { functions: [fn("tests/test_x.py")] })] })];
+  expect(withoutTests(tree).blocks.map((b) => b.id)).toEqual(["a"]);
 });

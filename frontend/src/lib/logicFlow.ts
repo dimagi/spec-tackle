@@ -97,3 +97,39 @@ export async function layoutFlow(
 export function allParentIds(blocks: LogicBlock[]): string[] {
   return blocks.flatMap((b) => (b.children?.length ? [b.id, ...allParentIds(b.children)] : []));
 }
+
+const TEST_PATHS = [
+  /(^|\/)(tests?|__tests__|e2e)\//, // a tests/ or e2e/ folder
+  /(^|\/)test_[^/]+\.py$/, // test_views.py
+  /_test\.(py|go|rb)$/, // views_test.py
+  /(^|\/)conftest\.py$/,
+  /\.(test|spec)\.[cm]?[jt]sx?$/, // Card.test.tsx, logic.spec.ts
+];
+
+export const isTestPath = (path: string) => TEST_PATHS.some((re) => re.test(path));
+
+/** A block about tests: its functions are all in test files, its steps are all tests, or its label says so. */
+export function isTestBlock(b: LogicBlock): boolean {
+  if (/^tests?\b/i.test(b.label)) return true;
+  if (b.children?.length) return b.children.every(isTestBlock);
+  return !!b.functions?.length && b.functions.every((f) => isTestPath(f.path));
+}
+
+/** The tree without test blocks (at any level) and without edges to them; `hidden` counts what was dropped. */
+export function withoutTests(blocks: LogicBlock[]): { blocks: LogicBlock[]; hidden: number } {
+  let hidden = 0;
+  const prune = (list: LogicBlock[]): LogicBlock[] => {
+    const kept = list.filter((b) => {
+      if (!isTestBlock(b)) return true;
+      hidden += 1;
+      return false;
+    });
+    const ids = new Set(kept.map((b) => b.id));
+    return kept.map((b) => ({
+      ...b,
+      next: b.next.filter((e) => ids.has(e.to)),
+      ...(b.children ? { children: prune(b.children) } : {}),
+    }));
+  };
+  return { blocks: prune(blocks), hidden };
+}

@@ -155,6 +155,7 @@ check the guard uses.
 - The chart pans and zooms, and has zoom controls. It fits itself to view after each layout and whenever its box changes width, for example when the function panel opens.
 - Cards don't start a pan when pressed (React Flow's `nopan` class); drag the background to pan.
 - The expanded set is saved per PR with `savePref(pr, "logicExpanded", ids)`.
+- Test blocks are hidden at first. A block is a test when its functions are all in test files (`tests/`, `test_*.py`, `*_test.py`, `conftest.py`, `*.test.ts(x)`, `*.spec.ts(x)`, `__tests__/`, `e2e/`), when its steps are all tests, or when its label starts with "Test". A "Show tests (N)" toggle, shown only when there are any, brings them back. The choice is saved per PR (`logicShowTests`). While tests are hidden, edges to and from them are dropped.
 - If ELK can't lay the map out, the view shows it as a nested list instead, with the same open and expand actions and a separate ⊕/⊖ button per block.
 - Theme: React Flow's colour mode follows the app's dark mode.
 

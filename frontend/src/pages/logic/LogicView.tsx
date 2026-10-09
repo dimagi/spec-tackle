@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { apiBase, logicKey, useLogic } from "../../api/queries";
 import { request } from "../../api/request";
 import type { LogicBlock, LogicMap, LogicState } from "../../api/types";
-import { allParentIds } from "../../lib/logicFlow";
+import { allParentIds, withoutTests } from "../../lib/logicFlow";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 import { FunctionPanel } from "./FunctionPanel";
 
@@ -143,6 +143,14 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
     () => new Set(loadPref<string[]>(pr, "logicExpanded", []).filter((id) => parents.has(id))),
   );
   const [selected, setSelected] = useState<LogicBlock | null>(null);
+  // Test blocks describe the PR's tests, not its behaviour: hidden unless asked for.
+  const [showTests, setShowTests] = useState(() => loadPref(pr, "logicShowTests", false));
+  const pruned = useMemo(() => withoutTests(map.blocks), [map.blocks]);
+  const blocks = showTests ? map.blocks : pruned.blocks;
+  const toggleTests = () => {
+    savePref(pr, "logicShowTests", !showTests);
+    setShowTests(!showTests);
+  };
   // ELK couldn't lay the map out: show it as a list instead.
   const [failed, setFailed] = useState(false);
 
@@ -176,6 +184,11 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-stone-500">
           <Legend />
           <span className="ml-auto flex gap-2">
+            {pruned.hidden > 0 && (
+              <button type="button" className="nav-btn" aria-pressed={showTests} onClick={toggleTests}>
+                {showTests ? "Hide" : "Show"} tests ({pruned.hidden})
+              </button>
+            )}
             <button type="button" className="nav-btn" onClick={() => setOpen(new Set(parents))}>Expand all</button>
             <button type="button" className="nav-btn" onClick={() => setOpen(new Set())}>Collapse all</button>
           </span>
@@ -183,11 +196,11 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
         {failed ? (
           <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
             <p className="mb-3 text-xs text-stone-500">The flowchart couldn't be laid out, so here it is as a list.</p>
-            <BlockList blocks={map.blocks} expanded={expanded} onActivate={activate} />
+            <BlockList blocks={blocks} expanded={expanded} onActivate={activate} />
           </div>
         ) : (
           <Suspense fallback={<div className="mt-4 h-[72vh] animate-pulse rounded-xl bg-stone-100 dark:bg-stone-900" />}>
-            <FlowChart blocks={map.blocks} expanded={expanded} selected={selected?.id ?? null}
+            <FlowChart blocks={blocks} expanded={expanded} selected={selected?.id ?? null}
               onActivate={activate} onFailed={() => setFailed(true)} />
           </Suspense>
         )}

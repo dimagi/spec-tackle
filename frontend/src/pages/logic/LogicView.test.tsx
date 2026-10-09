@@ -35,7 +35,11 @@ const BLOCKS: LogicBlock[] = [
     leaf("sync", "Queue a sync", { kind: "async", functions: [{ path: "lib/queue.py", symbol: "push", start: 1, end: 1 }] }),
   ] },
 ];
-const MAP: LogicMap = { id: "m1", headSha: HEAD, summary: "Retries failed submissions.", blocks: BLOCKS, createdAt: "2026-10-08T09:00:00Z" };
+const TEST_BLOCK: LogicBlock = {
+  id: "spec", label: "Test: retries are tried five times", kind: "step", change: "added", next: [],
+  functions: [{ path: "tests/test_retry.py", symbol: "test_five_tries", start: 1, end: 9 }],
+};
+const MAP: LogicMap = { id: "m1", headSha: HEAD, summary: "Retries failed submissions.", blocks: [...BLOCKS, TEST_BLOCK], createdAt: "2026-10-08T09:00:00Z" };
 const STORE_FNS: LogicFunctions = {
   label: "Store the visit", headSha: HEAD,
   functions: [{ path: "app/visits.py", symbol: "save", start: 2, end: 3, inDiff: true, step: "Store the visit", lines: [
@@ -292,4 +296,17 @@ test("a run started for a newer head is followed at that head, so the new map is
   source.send({ type: "done", mapId: "m1" });
   expect(await screen.findByText("Retries failed submissions.")).toBeInTheDocument();
   expect(screen.queryByText(/Generated for/)).toBeNull();
+});
+
+test("test blocks are hidden until you ask for them, and the choice is kept", async () => {
+  setup();
+  await node(/Form is submitted/);
+  expect(screen.queryByRole("button", { name: /Test: retries/ })).toBeNull();
+
+  const toggle = screen.getByRole("button", { name: "Show tests (1)" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await userEvent.click(toggle);
+  expect(await node(/Test: retries are tried five times/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Hide tests (1)" })).toHaveAttribute("aria-pressed", "true");
+  expect(loadPref(PR, "logicShowTests", false)).toBe(true);
 });
