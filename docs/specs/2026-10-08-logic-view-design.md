@@ -21,7 +21,7 @@ sent to GitHub.
 | Scope | One map per PR, describing the whole change end to end. It is not per file. |
 | Where | A **Logic view** tab next to **Code view** in the top bar's page tabs, shown only when Ask Claude is available. |
 | Shape | A tree of blocks, at most 3 levels deep and at most 12 blocks per level. Each level is a flowchart with edges between siblings. |
-| Expanding | Clicking a block with children expands it in place as a subgraph. Clicking a leaf opens a side panel with its functions. |
+| Expanding | Clicking any block opens a side panel with its code: a leaf's functions, or for a block with steps inside, the functions of every step under it, each labelled with its step. Ctrl-click (⌘-click on Mac) expands or collapses a block with children in place as a subgraph. |
 | Leaf code | Each function's full source from the checkout at the map's commit, with the PR's added or changed lines highlighted. |
 | Rendering | Mermaid `flowchart TD`, which is already a lazily loaded dependency, built from the tree on the client. |
 | How Claude is called | The same as Ask Claude: Agent SDK, read-only Read/Grep/Glob on the checkout, the same file guard, and no MCP servers. |
@@ -103,14 +103,12 @@ behind it, such as a configuration change.
 
 ### Source for the function panel
 
-`GET /api/logic/{map_id}/functions/{index}` returns the functions of one leaf. Here
-`index` is the leaf's position in a depth-first walk of the tree; the client computes it
-the same way. Only the map's owner can read it.
+`GET /api/logic/{map_id}/blocks/{block_id}/functions` returns the functions behind a block: a leaf's own, or, for a block with steps inside, every step's at any depth (each function once, tagged with its step's label). Only the map's owner can read it.
 
 The response, for each `FunctionRef`:
 
 ```
-{ path, symbol, start, end,
+{ path, symbol, start, end, step,
   lines: [{ n: int, text: str, changed: bool }],   # start..end from the map's worktree
   inDiff: bool,                                     # the file is part of the PR's diff
   missing?: "File not found in the checkout" }
@@ -157,7 +155,7 @@ check the guard uses.
 - A block with children shows ⊕ after its label. When expanded, it becomes a `subgraph` titled with its label (⊖ prefix), containing its children and their edges. Edges that pointed at the block now point at the subgraph.
 - All label text is escaped for Mermaid, covering quotes, brackets, braces, `#`, `<`, `>` and `|`.
 - After rendering, the view attaches click and keyboard handlers to the nodes by id. The nodes become focusable (`tabindex=0`, `role=button`, with an `aria-label` that names the kind, the label and whether the block expands or opens functions).
-- Clicking a block with children toggles it. Clicking a leaf opens the function panel.
+- Clicking a block opens the function panel; Enter does the same. Ctrl-click or ⌘-click (Ctrl/⌘+Enter on the keyboard) expands or collapses a block with children. The legend and each node's tooltip say so.
 - The expanded set is saved per PR with `savePref(pr, "logicExpanded", ids)`.
 - A visually hidden nested list mirrors the tree for screen readers. If Mermaid throws, the same list is shown visibly instead, with the same expand and open actions.
 - Theme: the chart uses Mermaid's dark theme when the app is in dark mode.

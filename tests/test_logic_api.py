@@ -114,14 +114,28 @@ def test_functions_of_a_leaf_with_changed_lines(claude_app):
     assert body["label"] == "Lines two and three" and body["headSha"] == "abc1234"
     [fn] = body["functions"]
     assert (fn["path"], fn["symbol"], fn["start"], fn["end"], fn["inDiff"]) == ("docs/a.md", "body", 2, 3, True)
+    assert fn["step"] == "Lines two and three"
     assert [(l["n"], l["changed"]) for l in fn["lines"]] == [(2, True), (3, True)]
     assert "two" in fn["lines"][0]["html"]
 
 
-def test_functions_refuses_unknown_blocks_parents_and_other_logins(claude_app):
+def test_a_parent_block_shows_the_code_of_every_step_inside_it(claude_app):
+    map_id = _generated(claude_app)
+    body = claude_app.get(f"/api/logic/{map_id}/blocks/body/functions").json()
+    assert body["label"] == "Body"
+    [fn] = body["functions"]
+    assert (fn["step"], fn["symbol"], fn["path"]) == ("Lines two and three", "body", "docs/a.md")
+    assert [(l["n"], l["changed"]) for l in fn["lines"]] == [(2, True), (3, True)]
+
+
+def test_a_step_without_functions_has_none(claude_app):
+    map_id = _generated(claude_app)
+    assert claude_app.get(f"/api/logic/{map_id}/blocks/start/functions").json()["functions"] == []
+
+
+def test_functions_refuses_unknown_blocks_and_other_logins(claude_app):
     map_id = _generated(claude_app)
     assert claude_app.get(f"/api/logic/{map_id}/blocks/nope/functions").status_code == 404
-    assert claude_app.get(f"/api/logic/{map_id}/blocks/body/functions").status_code == 404
     app.state.session.login_name = "someone-else"
     assert claude_app.get(f"/api/logic/{map_id}/blocks/leaf/functions").status_code == 404
     assert claude_app.get(LOGIC, params={"head": "abc1234"}).json()["map"] is None

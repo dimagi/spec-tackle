@@ -203,3 +203,12 @@ def test_function_source_line_numbers_survive_leading_blank_lines(tmp_path):
     out = logic.function_source(root, {"path": "a.py", "symbol": "x", "start": 3, "end": 4}, changed=set())
     assert [(l["n"], l["html"].count("import")) for l in out["lines"]] == [(3, 1), (4, 0)]
     assert "x" in out["lines"][1]["html"]
+
+
+def test_leaf_functions_gathers_every_step_once_with_its_label():
+    blocks = good_map()["blocks"]
+    ref = {"path": "app/visits.py", "symbol": "save", "start": 3, "end": 8}
+    blocks[2]["children"][1]["functions"] = [ref, {"path": "app/visits.py", "symbol": "sync", "start": 9, "end": 9}]
+    found = logic.leaf_functions(blocks[2])
+    assert [(step, f["symbol"]) for step, f in found] == [("Save the visit", "save"), ("Queue a sync", "sync")]
+    assert logic.leaf_functions(blocks[3]) == []

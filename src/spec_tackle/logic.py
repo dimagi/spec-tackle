@@ -220,6 +220,24 @@ def find_block(blocks: list[dict], block_id: str) -> dict | None:
     return None
 
 
+def leaf_functions(block: dict) -> list[tuple[str, dict]]:
+    """Every function behind a block, as (step label, ref): its own, or its steps' at any depth, each once."""
+    found: list[tuple[str, dict]] = []
+    seen: set[tuple] = set()
+
+    def walk(b: dict) -> None:
+        for ref in b.get("functions", []):
+            key = (ref["path"], ref["symbol"], ref["start"], ref["end"])
+            if key not in seen:
+                seen.add(key)
+                found.append((b["label"], ref))
+        for child in b.get("children", []):
+            walk(child)
+
+    walk(block)
+    return found
+
+
 def function_source(root: Path, ref: dict, changed: set[int]) -> dict:
     """One function's lines from the checkout, highlighted, with the PR's changes marked."""
     path, start, end = ref["path"], ref["start"], ref["end"]

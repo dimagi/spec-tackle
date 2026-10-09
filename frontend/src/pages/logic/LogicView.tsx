@@ -146,8 +146,9 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
     setExpanded(next);
     savePref(pr, "logicExpanded", [...next]);
   };
-  const activate = (block: LogicBlock) => {
-    if (block.children?.length) {
+  /** A click shows a block's code; Ctrl/⌘-click expands or collapses a block with steps inside. */
+  const activate = (block: LogicBlock, expand: boolean) => {
+    if (expand && block.children?.length) {
       const next = new Set(expanded);
       if (next.has(block.id)) next.delete(block.id);
       else next.add(block.id);
@@ -195,7 +196,7 @@ function Legend() {
       {swatch("added", "Added by this PR")}
       {swatch("changed", "Changed")}
       {swatch("unchanged", "Unchanged context")}
-      <span>⊕ has finer steps</span>
+      <span>⊕ has finer steps: Ctrl-click (⌘ on Mac) to expand</span>
       <span>◇ decision · ↻ loop · ⚡ async</span>
     </span>
   );
@@ -208,7 +209,7 @@ const CLUSTER_ID = /(?:^|-)(c\d+)$/;
 type ChartProps = {
   chart: MermaidChart;
   selected: string | null;
-  onActivate: (block: LogicBlock) => void;
+  onActivate: (block: LogicBlock, expand: boolean) => void;
   fallback: React.ReactNode;
 };
 
@@ -247,11 +248,18 @@ function Chart({ chart, selected, onActivate, fallback }: ChartProps) {
         el.setAttribute("role", "button");
         el.setAttribute("aria-label", label);
         el.classList.add("logic-hit");
-        const go = () => { refocus.current = block.id; activate.current(block); };
-        el.addEventListener("click", go);
+        // A hover tooltip: SVG shows a <title> child.
+        const tip = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        tip.textContent = label;
+        el.prepend(tip);
+        const go = (e: MouseEvent | KeyboardEvent) => {
+          refocus.current = block.id;
+          activate.current(block, e.ctrlKey || e.metaKey);
+        };
+        el.addEventListener("click", (e) => go(e as MouseEvent));
         el.addEventListener("keydown", (e) => {
           const key = (e as KeyboardEvent).key;
-          if (key === "Enter" || key === " ") { e.preventDefault(); go(); }
+          if (key === "Enter" || key === " ") { e.preventDefault(); go(e as KeyboardEvent); }
         });
         if (refocus.current === block.id) (el as HTMLElement).focus();
       };
@@ -259,11 +267,11 @@ function Chart({ chart, selected, onActivate, fallback }: ChartProps) {
         const block = chart.nodes.get(NODE_ID.exec(el.id)?.[1] ?? "");
         if (!block) return;
         const more = block.children?.length;
-        hook(el, block, `${block.label}${more ? " ⊕" : ""}: ${block.kind}, ${more ? "expand" : "show its functions"}`);
+        hook(el, block, `${block.label}${more ? " ⊕" : ""}: ${block.kind}, show its code${more ? "; Ctrl-click to expand" : ""}`);
       });
       root.querySelectorAll("g.cluster").forEach((el) => {
         const block = chart.clusters.get(CLUSTER_ID.exec(el.id)?.[1] ?? "");
-        if (block) hook(el, block, `⊖ ${block.label}: collapse`);
+        if (block) hook(el, block, `⊖ ${block.label}: show its code; Ctrl-click to collapse`);
       });
     };
     window.addEventListener("spec-tackle:theme", draw);
@@ -276,8 +284,9 @@ function Chart({ chart, selected, onActivate, fallback }: ChartProps) {
 
   useEffect(() => {
     ref.current?.querySelectorAll(".logic-hit").forEach((el) => {
-      const id = NODE_ID.exec(el.id)?.[1];
-      el.classList.toggle("is-selected", !!id && chart.nodes.get(id)?.id === selected);
+      const node = chart.nodes.get(NODE_ID.exec(el.id)?.[1] ?? "");
+      const cluster = chart.clusters.get(CLUSTER_ID.exec(el.id)?.[1] ?? "");
+      el.classList.toggle("is-selected", (node ?? cluster)?.id === selected);
     });
   }, [selected, chart]);
 
@@ -296,7 +305,7 @@ function Chart({ chart, selected, onActivate, fallback }: ChartProps) {
 
 /** The map as a nested list: shown when Mermaid can't draw it. */
 function BlockList({ blocks, expanded, onActivate, root = true }: {
-  blocks: LogicBlock[]; expanded: Set<string>; onActivate: (b: LogicBlock) => void; root?: boolean;
+  blocks: LogicBlock[]; expanded: Set<string>; onActivate: (b: LogicBlock, expand: boolean) => void; root?: boolean;
 }) {
   return (
     <ul role={root ? "tree" : "group"} aria-label={root ? "Logic map" : undefined} className={root ? "space-y-1 text-sm" : "ml-5 mt-1 space-y-1 border-l border-stone-200 pl-3 dark:border-stone-700"}>
@@ -304,8 +313,14 @@ function BlockList({ blocks, expanded, onActivate, root = true }: {
         const open = expanded.has(b.id);
         return (
           <li key={b.id} role="treeitem" aria-expanded={b.children?.length ? open : undefined}>
-            <button type="button" onClick={() => onActivate(b)} className={`logic-item ${b.change}`}>
-              {b.children?.length ? (open ? "⊖ " : "⊕ ") : "▸ "}{b.label}
+            {b.children?.length ? (
+              <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${b.label}`} onClick={() => onActivate(b, true)}
+                className="mr-1 rounded px-1 text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-800">
+                {open ? "⊖" : "⊕"}
+              </button>
+            ) : <span className="mr-1 px-1 text-stone-400">▸</span>}
+            <button type="button" onClick={(e) => onActivate(b, e.ctrlKey || e.metaKey)} className={`logic-item ${b.change}`}>
+              {b.label}
               <span className="ml-2 text-xs text-stone-500">{b.kind}</span>
             </button>
             {open && b.children && <BlockList blocks={b.children} expanded={expanded} onActivate={onActivate} root={false} />}

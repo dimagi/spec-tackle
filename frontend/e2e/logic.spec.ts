@@ -13,7 +13,15 @@ test("generate a logic map, expand it, open a function and jump to it in Review"
   await expect(page.getByText("Failed form submissions are retried with backoff")).toBeVisible();
 
   const chart = page.locator(".logic-chart");
+  // A plain click on a block with steps inside shows all their code.
   await chart.getByRole("button", { name: /Retry failures ⊕/ }).click();
+  const parent = page.getByRole("complementary", { name: "Retry failures" });
+  await expect(parent.getByText("Back off and resend")).toBeVisible();
+  await expect(parent.getByText("docs/retry.md:5–5")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Ctrl/⌘-click expands it.
+  await chart.getByRole("button", { name: /Retry failures ⊕/ }).click({ modifiers: ["ControlOrMeta"] });
   await expect(chart.getByRole("button", { name: /⊖ Retry failures/ })).toBeVisible();
 
   await chart.getByRole("button", { name: /Back off and resend/ }).click();

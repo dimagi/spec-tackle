@@ -26,21 +26,29 @@ export function FunctionPanel({ pr, mapId, block, headSha, onClose, onShowInRevi
         {fns.isPending && <p className="text-sm text-stone-500">Loading the code…</p>}
         {fns.error && <p className="text-sm text-red-700 dark:text-red-300">Couldn't load the code: {(fns.error as Error).message}</p>}
         {fns.data && !fns.data.functions.length && (
-          <p className="text-sm text-stone-500">No single function implements this step.</p>
+          <p className="text-sm text-stone-500">No single function implements this{block.children?.length ? " block's steps" : " step"}.</p>
         )}
         {fns.data?.functions.map((fn, i) => (
-          <Function key={i} pr={pr} fn={fn} headSha={headSha} onShowInReview={onShowInReview} />
+          <Function key={i} pr={pr} fn={fn} headSha={headSha} onShowInReview={onShowInReview}
+            step={fn.step !== block.label ? fn.step : null} />
         ))}
       </div>
     </aside>
   );
 }
 
-function Function({ pr, fn, headSha, onShowInReview }: { pr: PRRef; fn: LogicFunction; headSha: string; onShowInReview: Props["onShowInReview"] }) {
+type FunctionProps = {
+  pr: PRRef; fn: LogicFunction; headSha: string; onShowInReview: Props["onShowInReview"];
+  /** The step this function belongs to, when the panel is for a block with steps inside. */
+  step: string | null;
+};
+
+function Function({ pr, fn, headSha, onShowInReview, step }: FunctionProps) {
   const firstChange = fn.lines.find((l) => l.changed)?.n;
   const untouched = !fn.inDiff || firstChange === undefined;
   return (
     <section>
+      {step && <div className="logic-step mb-1 text-xs font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">{step}</div>}
       <div className="mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <div className="font-mono text-sm font-semibold">{fn.symbol}</div>
         <div className="font-mono text-xs text-stone-500">{fn.path}:{fn.start}–{fn.end}</div>

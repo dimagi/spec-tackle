@@ -50,14 +50,18 @@ const BLOCKS: LogicBlock[] = [
 const MAP: LogicMap = { id: "m1", headSha: HEAD, summary: "Retries failed submissions.", blocks: BLOCKS, createdAt: "2026-10-08T09:00:00Z" };
 const STORE_FNS: LogicFunctions = {
   label: "Store the visit", headSha: HEAD,
-  functions: [{ path: "app/visits.py", symbol: "save", start: 2, end: 3, inDiff: true, lines: [
+  functions: [{ path: "app/visits.py", symbol: "save", start: 2, end: 3, inDiff: true, step: "Store the visit", lines: [
     { n: 2, html: "<span>def save():</span>", changed: false },
     { n: 3, html: "<span>    retry()</span>", changed: true },
   ] }],
 };
 const SYNC_FNS: LogicFunctions = {
   label: "Queue a sync", headSha: HEAD,
-  functions: [{ path: "lib/queue.py", symbol: "push", start: 1, end: 1, inDiff: false, lines: [{ n: 1, html: "push()", changed: false }] }],
+  functions: [{ path: "lib/queue.py", symbol: "push", start: 1, end: 1, inDiff: false, step: "Queue a sync", lines: [{ n: 1, html: "push()", changed: false }] }],
+};
+const SAVE_FNS: LogicFunctions = {
+  label: "Save and sync", headSha: HEAD,
+  functions: [...STORE_FNS.functions, ...SYNC_FNS.functions],
 };
 
 const state = (over: Partial<LogicState> = {}): LogicState => ({ available: true, map: null, stale: false, running: false, ...over });
@@ -87,6 +91,14 @@ function setup(onShowInReview = vi.fn()) {
 
 const node = (name: RegExp) => screen.findByRole("button", { name });
 
+/** Click with Ctrl (or ⌘) held: the modifier has to stay down across the click. */
+async function modClick(el: Element, key: "Control" | "Meta" = "Control") {
+  const user = userEvent.setup();
+  await user.keyboard(`{${key}>}`);
+  await user.click(el);
+  await user.keyboard(`{/${key}}`);
+}
+
 /** The progress stream, once the component has opened it (after the POST resolves). */
 async function opened() {
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -102,6 +114,7 @@ beforeEach(() => {
     [`GET ${LOGIC}?head=${HEAD}`]: state({ map: MAP }),
     "GET /api/logic/m1/blocks/store/functions": STORE_FNS,
     "GET /api/logic/m1/blocks/sync/functions": SYNC_FNS,
+    "GET /api/logic/m1/blocks/save/functions": SAVE_FNS,
   };
   serve();
 });
@@ -167,16 +180,42 @@ test("a stale map says so and can be regenerated", async () => {
   expect(screen.getByText("Retries failed submissions.")).toBeInTheDocument();  // the old map stays up
 });
 
-test("clicking a block expands it, clicking its title collapses it, and the choice is kept", async () => {
+test("Ctrl-click expands a block, Ctrl-click on its title collapses it, and the choice is kept", async () => {
   setup();
-  await userEvent.click(await node(/Save and sync ⊕/));
+  await modClick(await node(/Save and sync ⊕/));
   expect(await screen.findByRole("button", { name: /⊖ Save and sync/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Store the visit/ })).toBeInTheDocument();
   expect(loadPref(PR, "logicExpanded", [])).toEqual(["save"]);
+  expect(screen.queryByRole("complementary")).toBeNull();
 
-  await userEvent.click(screen.getByRole("button", { name: /⊖ Save and sync/ }));
+  await modClick(screen.getByRole("button", { name: /⊖ Save and sync/ }));
   expect(await node(/Save and sync ⊕/)).toBeInTheDocument();
   expect(loadPref(PR, "logicExpanded", [])).toEqual([]);
+});
+
+test("⌘-click expands too, for Macs", async () => {
+  setup();
+  await modClick(await node(/Save and sync ⊕/), "Meta");
+  expect(await screen.findByRole("button", { name: /⊖ Save and sync/ })).toBeInTheDocument();
+});
+
+test("a plain click on an expandable block shows the code of every step inside it", async () => {
+  setup();
+  await userEvent.click(await node(/Save and sync ⊕/));
+  const panel = await screen.findByRole("complementary", { name: "Save and sync" });
+  expect(await within(panel).findByText("save")).toBeInTheDocument();
+  expect(within(panel).getByText("push")).toBeInTheDocument();
+  expect(within(panel).getByText("Store the visit")).toBeInTheDocument();
+  expect(within(panel).getByText("Queue a sync")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /⊖ Save and sync/ })).toBeNull();  // not expanded
+});
+
+test("a plain click on an expanded block's title shows its code too", async () => {
+  localStorage.setItem("spec-tackle:o/r#7:logicExpanded", JSON.stringify(["save"]));
+  setup();
+  await userEvent.click(await node(/⊖ Save and sync/));
+  expect(await screen.findByRole("complementary", { name: "Save and sync" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /⊖ Save and sync/ })).toBeInTheDocument();  // still expanded
 });
 
 test("Expand all and Collapse all", async () => {
@@ -195,6 +234,7 @@ test("a leaf opens its functions with the changed lines marked; Esc closes them"
   const panel = await screen.findByRole("complementary", { name: "Store the visit" });
   expect(await within(panel).findByText("save")).toBeInTheDocument();
   expect(within(panel).getByText("app/visits.py:2–3")).toBeInTheDocument();
+  expect(within(panel).queryByText("Store the visit", { selector: ".logic-step" })).toBeNull();
   const changed = within(panel).getByText("retry()").closest(".logic-line")!;
   expect(changed).toHaveClass("changed");
 
@@ -215,12 +255,17 @@ test("a function outside the PR links to GitHub instead", async () => {
     .toHaveAttribute("href", `https://github.com/o/r/blob/${HEAD}/lib/queue.py#L1-L1`);
 });
 
-test("blocks are keyboard operable", async () => {
+test("blocks are keyboard operable: Enter shows the code, Ctrl+Enter expands", async () => {
   setup();
   const save = await node(/Save and sync ⊕/);
   expect(save).toHaveAttribute("tabindex", "0");
+  expect(save).toHaveAccessibleName(/Ctrl-click to expand/);
+  const user = userEvent.setup();
   save.focus();
-  await userEvent.keyboard("{Enter}");
+  await user.keyboard("{Enter}");
+  expect(await screen.findByRole("complementary", { name: "Save and sync" })).toBeInTheDocument();
+  save.focus();
+  await user.keyboard("{Control>}{Enter}{/Control}");
   expect(await screen.findByRole("button", { name: /⊖ Save and sync/ })).toBeInTheDocument();
 });
 
@@ -229,7 +274,7 @@ test("if Mermaid fails, the map is shown as a list that still works", async () =
   setup();
   const list = await screen.findByRole("tree", { name: "Logic map" });
   expect(list).toBeVisible();
-  await userEvent.click(within(list).getByRole("button", { name: /Save and sync/ }));
+  await userEvent.click(within(list).getByRole("button", { name: "Expand Save and sync" }));
   await userEvent.click(await within(list).findByRole("button", { name: /Store the visit/ }));
   expect(await screen.findByRole("complementary", { name: "Store the visit" })).toBeInTheDocument();
 });

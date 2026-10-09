@@ -130,6 +130,8 @@ export type LogicState = { available: boolean; map: LogicMap | null; stale: bool
 export type LogicFunction = FunctionRef & {
   lines: { n: number; html: string; changed: boolean }[];
   inDiff: boolean;
+  /** The step (leaf block) this function belongs to; a parent block shows all its steps' code. */
+  step: string;
   missing?: string;
 };
 

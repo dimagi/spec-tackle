@@ -188,7 +188,7 @@ async def block_functions(request: Request, map_id: str, block_id: str):
     state, _, login = await _signed_in(request)
     saved = state.store.logic_map(login=login, map_id=map_id)
     block = saved and logic.find_block(saved["blocks"], block_id)
-    if not block or "children" in block:
+    if not block:
         raise HTTPException(404, "No such block")
     token = await state.session.token()
     try:
@@ -199,10 +199,11 @@ async def block_functions(request: Request, map_id: str, block_id: str):
         raise HTTPException(502, f"Couldn't fetch the repository: {exc}")
     changed = saved["changedLines"]
     functions = []
-    for ref in block.get("functions", []):
+    # A block with steps inside shows the code of all of them.
+    for step, ref in logic.leaf_functions(block):
         try:
             source = logic.function_source(root, ref, changed=set(changed.get(ref["path"], [])))
         except ValueError:
             source = {**ref, "lines": [], "missing": "File not found in the checkout"}
-        functions.append({**source, "inDiff": ref["path"] in changed})
+        functions.append({**source, "inDiff": ref["path"] in changed, "step": step})
     return {"label": block["label"], "headSha": saved["headSha"], "functions": functions}
