@@ -47,6 +47,21 @@ _MIGRATIONS = [
         UNIQUE (login, owner, repo, number, head_sha)
     );
     """,
+    # 4: cross-references in a document (see docs/specs/2026-10-09-doc-references-design.md)
+    """
+    CREATE TABLE doc_refs (
+        id TEXT PRIMARY KEY, login TEXT NOT NULL,
+        owner TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL,
+        path TEXT NOT NULL, head_sha TEXT NOT NULL, refs TEXT NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE (login, owner, repo, number, path, head_sha)
+    );
+    """,
+    # 5: references carried forward from an older commit, and the lines still to check
+    """
+    ALTER TABLE doc_refs ADD COLUMN pending TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE doc_refs ADD COLUMN based_on TEXT;
+    ALTER TABLE doc_refs ADD COLUMN outdated INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 
@@ -212,5 +227,63 @@ class Store:
             "summary": row["summary"],
             "blocks": json.loads(row["tree"]),
             "changedLines": json.loads(row["changed_lines"]),
+            "createdAt": row["created_at"],
+        }
+
+    # -- Document cross-references ---------------------------------------------
+
+    def save_doc_refs(
+        self, *, login: str, pr: PRRef, path: str, head_sha: str, refs: list,
+        pending: list[int] | None = None, based_on: str | None = None, outdated: int = 0,
+    ) -> str:
+        """Store a file's references; a set for the same login, PR, path and commit is replaced.
+
+        A set carried forward from an older commit (`based_on`) lists the document lines
+        still to check (`pending`) and how many references were dropped as `outdated`.
+        """
+        refs_id = str(uuid.uuid4())
+        self._db.execute(
+            "INSERT OR REPLACE INTO doc_refs (id, login, owner, repo, number, path, head_sha, refs,"
+            " created_at, pending, based_on, outdated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (refs_id, login, pr.owner, pr.repo, pr.number, path, head_sha, json.dumps(refs), _now(),
+             json.dumps(pending or []), based_on, outdated),
+        )
+        return refs_id
+
+    def latest_doc_refs(self, *, login: str, pr: PRRef, path: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM doc_refs WHERE login = ? AND owner = ? AND repo = ? AND number = ? AND path = ?"
+            " ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (login, pr.owner, pr.repo, pr.number, path),
+        ).fetchone()
+        return self._doc_refs(row) if row else None
+
+    def doc_refs_at(self, *, login: str, pr: PRRef, path: str, head_sha: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM doc_refs WHERE login = ? AND owner = ? AND repo = ? AND number = ? AND path = ?"
+            " AND head_sha = ?",
+            (login, pr.owner, pr.repo, pr.number, path, head_sha),
+        ).fetchone()
+        return self._doc_refs(row) if row else None
+
+    def doc_refs(self, *, login: str, refs_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM doc_refs WHERE id = ? AND login = ?", (refs_id, login)
+        ).fetchone()
+        return self._doc_refs(row) if row else None
+
+    @staticmethod
+    def _doc_refs(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "owner": row["owner"],
+            "repo": row["repo"],
+            "number": row["number"],
+            "path": row["path"],
+            "headSha": row["head_sha"],
+            "refs": json.loads(row["refs"]),
+            "pending": json.loads(row["pending"]),
+            "basedOn": row["based_on"],
+            "outdated": row["outdated"],
             "createdAt": row["created_at"],
         }
