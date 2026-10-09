@@ -5,6 +5,7 @@ import { externalLinks } from "../../lib/links";
 import { rangeLabel } from "../../lib/threads";
 import type { Live } from "./hooks/claudeStream";
 import { ReplyBox } from "./ReplyBox";
+import { EnlargeButton } from "./ThreadCard";
 
 type Props = {
   thread: ClaudeThread;
@@ -13,6 +14,8 @@ type Props = {
   onFollowUp: (question: string) => Promise<unknown>;
   onDelete: () => void;
   onFocus: () => void;
+  enlarged?: boolean;
+  onEnlarge?: (enlarged: boolean) => void;
 };
 
 function Message({ m }: { m: ClaudeMessage }) {
@@ -44,7 +47,7 @@ function Message({ m }: { m: ClaudeMessage }) {
   );
 }
 
-export function ClaudeCard({ thread: t, headSha, live, onFollowUp, onDelete, onFocus }: Props) {
+export function ClaudeCard({ thread: t, headSha, live, onFollowUp, onDelete, onFocus, enlarged = false, onEnlarge }: Props) {
   const last = t.messages[t.messages.length - 1];
   return (
     <>
@@ -53,6 +56,7 @@ export function ClaudeCard({ thread: t, headSha, live, onFollowUp, onDelete, onF
         <span className="chip" title={t.path}>{rangeLabel(t.startLine, t.endLine)}</span>
         <span className="flex-1" />
         <button className="icon-btn" title="Delete this thread" onClick={onDelete}>Delete</button>
+        {onEnlarge && <EnlargeButton enlarged={enlarged} onEnlarge={onEnlarge} />}
       </div>
       <div className="claude-note">
         {t.commit !== headSha && (

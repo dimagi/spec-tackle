@@ -101,3 +101,14 @@ test("other people's comments have no Edit", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Comment options" }));
   expect(screen.queryByRole("menuitem", { name: "Edit" })).not.toBeInTheDocument();
 });
+
+test("the enlarge button says which way it goes", async () => {
+  const onEnlarge = vi.fn();
+  const { props, rerender } = renderCard({ onEnlarge });
+  await userEvent.click(screen.getByRole("button", { name: "Enlarge thread" }));
+  expect(onEnlarge).toHaveBeenCalledWith(true);
+
+  rerender(<ThreadCard {...props} enlarged />);
+  await userEvent.click(screen.getByRole("button", { name: "Shrink thread" }));
+  expect(onEnlarge).toHaveBeenLastCalledWith(false);
+});

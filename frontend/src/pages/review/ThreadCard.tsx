@@ -17,6 +17,9 @@ export type ThreadCardProps = {
   onCollapse: () => void;
   onExpandBody: (commentId: number) => void;
   onResolve: (resolved: boolean) => void;
+  enlarged?: boolean;
+  /** Show the thread large in the middle of the page, or put it back in the margin. */
+  onEnlarge?: (enlarged: boolean) => void;
   /** Save an edited comment; without it, comments can't be edited here. */
   onEdit?: (comment: Comment, body: string) => Promise<unknown>;
   /** The reply box, below the comments. */
@@ -71,7 +74,18 @@ function CommentView({ c, fresh, expanded, onExpand, onEdit }: CommentViewProps)
   );
 }
 
-export function ThreadCard({ thread: t, collapsed, collapsible, active, fresh, bodyExpanded, onExpand, onCollapse, onExpandBody, onResolve, onEdit, children }: ThreadCardProps) {
+/** Toggles a margin card between its normal size and a large centered view. */
+export function EnlargeButton({ enlarged, onEnlarge }: { enlarged: boolean; onEnlarge: (enlarged: boolean) => void }) {
+  return (
+    <button type="button" className="icon-btn" aria-pressed={enlarged}
+      aria-label={enlarged ? "Shrink thread" : "Enlarge thread"} title={enlarged ? "Back to the margin (Esc)" : "Enlarge to read"}
+      onClick={() => onEnlarge(!enlarged)}>
+      {enlarged ? "⤡" : "⤢"}
+    </button>
+  );
+}
+
+export function ThreadCard({ thread: t, collapsed, collapsible, active, fresh, bodyExpanded, onExpand, onCollapse, onExpandBody, onResolve, onEdit, enlarged = false, onEnlarge, children }: ThreadCardProps) {
   const range = threadRange(t);
   const freshCount = t.comments.filter((c) => fresh.has(c.id)).length;
   let where: ReactNode = null;
@@ -91,6 +105,7 @@ export function ThreadCard({ thread: t, collapsed, collapsible, active, fresh, b
         {t.isResolved
           ? <button className="icon-btn" onClick={() => onResolve(false)}>Reopen</button>
           : <button className="icon-btn" title="Mark as resolved" onClick={() => onResolve(true)}>✓ Resolve</button>}
+        {onEnlarge && <EnlargeButton enlarged={enlarged} onEnlarge={onEnlarge} />}
         <a className="icon-btn" href={first.url} target="_blank" rel="noopener" title="Open on GitHub">↗</a>
       </div>
       <div className="thread-body">

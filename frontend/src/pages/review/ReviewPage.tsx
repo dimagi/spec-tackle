@@ -383,6 +383,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   useKeyboard({
     step: (direction) => { if (onReview) step(direction); },
     escape: () => {
+      if (store.getState().enlarged) return store.getState().enlarge(null);
       if (store.getState().composer && !composerDirty.current) closeComposer();
       activate(null);
     },

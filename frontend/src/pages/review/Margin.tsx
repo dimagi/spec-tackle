@@ -1,4 +1,4 @@
-import { useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { ClaudeThread, Comment, Thread } from "../../api/types";
 import { isCollapsible, isShown, threadRange } from "../../lib/threads";
 import { useReview } from "../../state/review";
@@ -44,8 +44,24 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
   const engine = useMarginEngine(docRef, marginRef, items, s.active, s.scrollSeq);
   engineRef.current = engine.current;
 
+  // A thread that gets hidden (say, resolved under the Open filter) can't stay enlarged.
+  const enlargedShown = items.some((i) => i.id === s.enlarged && !i.hidden);
+  useEffect(() => {
+    if (s.enlarged && !enlargedShown) s.enlarge(null);
+  }, [s.enlarged, enlargedShown]);
+
+  // The page behind an enlarged thread stays put.
+  useEffect(() => {
+    document.body.classList.toggle("has-enlarged", !!s.enlarged);
+    return () => document.body.classList.remove("has-enlarged");
+  }, [s.enlarged]);
+  const enlargedProps = (id: string, label: string) => (s.enlarged === id
+    ? { role: "dialog", "aria-modal": true, "aria-label": label }
+    : {});
+
   return (
     <div id="margin" ref={marginRef} className="relative hidden w-[340px] shrink-0 md:block xl:w-[380px]">
+      {enlargedShown && <div className="enlarge-backdrop" data-testid="enlarge-backdrop" onClick={() => s.enlarge(null)} />}
       {activity.threads.map((t) => {
         const collapsible = isCollapsible(t);
         const collapsed = collapsible && !s.expanded.has(t.id) && s.active !== t.id;
@@ -54,7 +70,8 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
             key={t.id}
             data-card={t.id}
             data-thread={t.id}
-            className={`thread-card ${collapsed ? "is-collapsed" : ""}`}
+            className={`thread-card ${collapsed ? "is-collapsed" : ""} ${s.enlarged === t.id ? "is-enlarged" : ""}`}
+            {...enlargedProps(t.id, "Comment thread")}
             hidden={!isShown(t, filters)}
             onClick={(e) => { if (!isInteractive(e.target) && s.active !== t.id) s.activate(t.id); }}
           >
@@ -65,6 +82,7 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
               onExpandBody={(id) => { s.expandBody(id); engine.current.scheduleLayout(); }}
               onResolve={(resolved) => onResolve(t, resolved)}
               onEdit={onEdit}
+              enlarged={s.enlarged === t.id} onEnlarge={(on) => s.enlarge(on ? t.id : null)}
             >
               {renderReply(t)}
             </ThreadCard>
@@ -76,7 +94,8 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
           key={t.id}
           data-card={t.id}
           data-claude={t.id}
-          className="thread-card claude"
+          className={`thread-card claude ${s.enlarged === t.id ? "is-enlarged" : ""}`}
+          {...enlargedProps(t.id, "Claude thread")}
           hidden={!s.showClaude}
           onClick={(e) => { if (!isInteractive(e.target) && s.active !== t.id) s.activate(t.id); }}
         >
@@ -84,6 +103,7 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
             thread={t} headSha={activity.headSha} live={claude.lives.get(t.id) ?? null}
             onFollowUp={(q) => claude.onFollowUp(t, q)} onDelete={() => claude.onDelete(t)}
             onFocus={() => { if (s.active !== t.id) s.activate(t.id); }}
+            enlarged={s.enlarged === t.id} onEnlarge={(on) => s.enlarge(on ? t.id : null)}
           />
         </div>
       ))}
