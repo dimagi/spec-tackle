@@ -23,6 +23,11 @@ from .turns import TurnRunner
 
 HERE = Path(__file__).parent
 SPA_SHELL = HERE / "static" / "dist" / "index.html"
+# Repo files /raw shows in the browser; anything else (HTML, XHTML, XML, ...) is a download.
+INLINE_RAW_TYPES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp",
+    "image/svg+xml", "image/vnd.microsoft.icon", "image/x-icon",
+}
 
 
 @asynccontextmanager
@@ -133,14 +138,15 @@ async def raw(request: Request, owner: str, repo: str, ref: str, path: str):
     client = await gh(request)
     content = await client.raw_file(owner, repo, quote(path), ref)
     media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    if media_type in ("text/html", "image/svg+xml"):
-        # Never let repo content run script on our origin.
-        return Response(
-            content,
-            media_type=media_type,
-            headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"},
-        )
-    return Response(content, media_type=media_type)
+    # Never let repo content run script on our origin: a page anywhere can open this URL.
+    headers = {
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if media_type not in INLINE_RAW_TYPES:
+        media_type = "application/octet-stream"
+        headers["Content-Disposition"] = "attachment"
+    return Response(content, media_type=media_type, headers=headers)
 
 
 # -- API -------------------------------------------------------------------
