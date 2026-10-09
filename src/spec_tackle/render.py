@@ -115,10 +115,11 @@ def render_diff(patch: str, path: str) -> str:
 
 
 def _lexer_for(path_or_lang: str, is_lang: bool = False):
+    # stripnl=False: Pygments otherwise drops leading blank lines, shifting every line number.
     try:
         if is_lang:
-            return get_lexer_by_name(path_or_lang)
-        return guess_lexer_for_filename(path_or_lang, "")
+            return get_lexer_by_name(path_or_lang, stripnl=False)
+        return guess_lexer_for_filename(path_or_lang, "", stripnl=False)
     except ClassNotFound:
         return None
 

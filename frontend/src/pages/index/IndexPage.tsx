@@ -5,6 +5,7 @@ import spectacles from "../../assets/spectacles.svg?raw";
 import { Html } from "../../components/Html";
 import { ThemeSwitch } from "../../components/ThemeSwitch";
 import { ViewerBadge } from "../../components/ViewerBadge";
+import { BrowsePrs } from "./BrowsePrs";
 import { safeNext, SignIn } from "./SignIn";
 
 export function IndexPage() {
@@ -28,9 +29,9 @@ export function IndexPage() {
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
               spec-tackle
             </div>
-            <h1 className="font-serif text-5xl font-semibold leading-tight tracking-tight">Read the spec.<br />Not the diff.</h1>
+            <h1 className="font-serif text-5xl font-semibold leading-tight tracking-tight">Review pull requests<br />like documents.</h1>
             <p className="mt-4 max-w-lg text-lg text-stone-600 dark:text-stone-400">
-              Paste a GitHub pull request link to open it as a readable document. Comments sit in the margin, and anything you write is posted to the PR.
+              Open any GitHub pull request. Markdown reads as a rendered document, code as a clean diff, and review threads sit in the margin beside the lines they're about. Anything you write is posted to the PR.
             </p>
           </div>
 
@@ -38,15 +39,19 @@ export function IndexPage() {
             <SignIn ghCli={session.data.ghCli} notice={params.get("notice")} onDone={() => window.location.assign(next || window.location.pathname)} />
           )}
           {session.data?.viewer && (
-            <form action="/" method="get" className="flex flex-col gap-3 sm:flex-row">
-              <input
-                name="url" required autoFocus defaultValue={params.get("url") ?? ""} placeholder="https://github.com/org/repo/pull/123"
-                className="flex-1 rounded-xl border border-stone-300 bg-white px-4 py-3 text-base shadow-sm outline-none ring-amber-400/40 placeholder:text-stone-400 focus:border-amber-500 focus:ring-4 dark:border-stone-700 dark:bg-stone-900"
-              />
-              <button className="rounded-xl bg-stone-900 px-6 py-3 font-semibold text-white shadow-sm transition hover:bg-stone-700 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300">
-                Open for review →
-              </button>
-            </form>
+            <>
+              <form action="/" method="get" className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  name="url" required autoFocus defaultValue={params.get("url") ?? ""} placeholder="Paste a PR link or owner/repo#123"
+                  className="flex-1 rounded-xl border border-stone-300 bg-white px-4 py-3 text-base shadow-sm outline-none ring-amber-400/40 placeholder:text-stone-400 focus:border-amber-500 focus:ring-4 dark:border-stone-700 dark:bg-stone-900"
+                />
+                <button className="rounded-xl bg-stone-900 px-6 py-3 font-semibold text-white shadow-sm transition hover:bg-stone-700 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300">
+                  Open for review →
+                </button>
+              </form>
+              <div className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-stone-500">Or browse</div>
+              <BrowsePrs />
+            </>
           )}
           {(error || session.error) && (
             <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">

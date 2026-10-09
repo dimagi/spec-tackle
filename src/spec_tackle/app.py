@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import claude, claude_api, pages, render
+from . import claude, claude_api, logic_api, pages, render
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
 from .github import GitHub, GitHubError, PRRef, parse_pr_url
@@ -82,6 +82,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(HostCheck)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 app.include_router(claude_api.router)
+app.include_router(logic_api.router)
 
 
 @app.exception_handler(GitHubError)
@@ -191,6 +192,21 @@ async def session_info(request: Request):
         "ghCli": LoginFlow.available(),
         "claude": bool(request.app.state.claude_cli),
     }
+
+
+@app.get("/api/review-requests")
+async def review_requests(request: Request):
+    return await (await gh(request)).review_requests()
+
+
+@app.get("/api/repos")
+async def repos(request: Request, q: str = ""):
+    return await (await gh(request)).repos(q)
+
+
+@app.get("/api/repos/{owner}/{repo}/pulls")
+async def open_pulls(request: Request, owner: str, repo: str):
+    return await (await gh(request)).open_pulls(owner, repo)
 
 
 @app.get("/api/pr/{owner}/{repo}/{number}/page")

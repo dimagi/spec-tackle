@@ -105,6 +105,77 @@ query($owner: String!, $repo: String!, $number: Int!) {{
 """
 
 
+_REVIEW_REQUESTS_QUERY = """
+query {
+  search(query: "is:open is:pr review-requested:@me sort:updated-desc", type: ISSUE, first: 20) {
+    nodes {
+      ... on PullRequest {
+        number title isDraft updatedAt url
+        repository { name owner { login } }
+        author { login }
+      }
+    }
+  }
+}
+"""
+
+
+_REPO_FIELDS = "name owner { login } description isPrivate pushedAt pullRequests(states: OPEN) { totalCount }"
+
+_VIEWER_REPOS_QUERY = f"""
+query {{
+  viewer {{
+    repositories(first: 30, orderBy: {{field: PUSHED_AT, direction: DESC}},
+                 affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER],
+                 ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]) {{
+      nodes {{ {_REPO_FIELDS} }}
+    }}
+    repositoriesContributedTo(first: 30, orderBy: {{field: PUSHED_AT, direction: DESC}}, includeUserRepositories: true,
+                              contributionTypes: [COMMIT, PULL_REQUEST, PULL_REQUEST_REVIEW]) {{
+      nodes {{ {_REPO_FIELDS} }}
+    }}
+  }}
+}}
+"""
+
+_REPO_SEARCH_QUERY = f"""
+query($q: String!) {{
+  search(query: $q, type: REPOSITORY, first: 20) {{
+    nodes {{ ... on Repository {{ {_REPO_FIELDS} }} }}
+  }}
+}}
+"""
+
+_OPEN_PULLS_QUERY = """
+query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(states: OPEN, first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes { number title isDraft updatedAt url author { login } }
+    }
+  }
+}
+"""
+
+
+def repo_search_query(text: str) -> str:
+    """GitHub search syntax for what someone typed: `owner/partial` searches within that owner."""
+    owner, slash, name = text.strip().partition("/")
+    if not slash:
+        return f"{owner} in:name"
+    return f"user:{owner} {name.strip()} in:name" if name.strip() else f"user:{owner}"
+
+
+def _repo(node: dict) -> dict:
+    return {
+        "owner": node["owner"]["login"],
+        "repo": node["name"],
+        "description": node["description"],
+        "isPrivate": node["isPrivate"],
+        "pushedAt": node["pushedAt"],
+        "openPrs": node["pullRequests"]["totalCount"],
+    }
+
+
 class GitHub:
     def __init__(self, token: str):
         self.token = token
@@ -137,12 +208,13 @@ class GitHub:
             raise GitHubError(message, status=response.status_code)
         return response
 
-    async def _graphql(self, query: str, **variables) -> dict:
+    async def _graphql(self, query: str, *, partial: bool = False, **variables) -> dict:
+        """Run a query; with `partial`, return whatever data came back alongside errors."""
         response = await self._request(
             "POST", "/graphql", json={"query": query, "variables": variables}
         )
         payload = response.json()
-        if payload.get("errors"):
+        if payload.get("errors") and not (partial and payload.get("data")):
             raise GitHubError("; ".join(e["message"] for e in payload["errors"]), 502)
         return payload["data"]
 
@@ -180,6 +252,62 @@ class GitHub:
         return await self._paginate(
             f"/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/files"
         )
+
+    async def review_requests(self) -> list[dict]:
+        """Open PRs waiting on the viewer's review, most recently updated first."""
+        # Orgs the token isn't SSO-authorized for add errors; keep the rest of the results.
+        data = await self._graphql(_REVIEW_REQUESTS_QUERY, partial=True)
+        pulls = [
+            {
+                "owner": node["repository"]["owner"]["login"],
+                "repo": node["repository"]["name"],
+                "number": node["number"],
+                "title": node["title"],
+                "author": (node["author"] or {}).get("login"),
+                "updatedAt": node["updatedAt"],
+                "isDraft": node["isDraft"],
+                "url": node["url"],
+            }
+            for node in data["search"]["nodes"]
+            if node  # non-PR hits are empty objects
+        ]
+        return sorted(pulls, key=lambda p: p["updatedAt"], reverse=True)
+
+    async def repos(self, query: str = "") -> list[dict]:
+        """Repos to browse: the viewer's own and contributed ones, or a search when `query` is given."""
+        # Orgs the token isn't SSO-authorized for add errors; keep the rest of the results.
+        if query.strip():
+            data = await self._graphql(_REPO_SEARCH_QUERY, partial=True, q=repo_search_query(query))
+            return [_repo(node) for node in data["search"]["nodes"] if node]
+        viewer = (await self._graphql(_VIEWER_REPOS_QUERY, partial=True))["viewer"]
+        found: dict[tuple[str, str], dict] = {}
+        for key in ("repositories", "repositoriesContributedTo"):
+            for node in (viewer.get(key) or {}).get("nodes") or []:
+                if node:
+                    repo = _repo(node)
+                    found.setdefault((repo["owner"], repo["repo"]), repo)
+        ordered = sorted(found.values(), key=lambda r: r["pushedAt"] or "", reverse=True)
+        return ordered[:30]
+
+    async def open_pulls(self, owner: str, repo: str) -> list[dict]:
+        """A repo's open PRs, most recently updated first."""
+        data = await self._graphql(_OPEN_PULLS_QUERY, owner=owner, repo=repo)
+        if data["repository"] is None:
+            raise GitHubError("Repository not found", 404)
+        return [
+            {
+                "owner": owner,
+                "repo": repo,
+                "number": node["number"],
+                "title": node["title"],
+                "author": (node["author"] or {}).get("login"),
+                "updatedAt": node["updatedAt"],
+                "isDraft": node["isDraft"],
+                "url": node["url"],
+            }
+            for node in data["repository"]["pullRequests"]["nodes"]
+            if node
+        ]
 
     async def raw_file(self, owner: str, repo: str, path: str, ref: str) -> bytes:
         response = await self._request(

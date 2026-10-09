@@ -18,6 +18,8 @@ type Props = {
   onRefresh: () => void;
   onFinishReview: () => void;
   tabs?: ReactNode;
+  /** The PR title, as a switcher to other PRs. */
+  switcher: ReactNode;
 };
 
 function syncLabel(sync: SyncStatus) {
@@ -27,7 +29,7 @@ function syncLabel(sync: SyncStatus) {
   return `Live · ${timeAgo(new Date(sync.lastSync).toISOString())}`;
 }
 
-export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRefresh, onFinishReview, tabs }: Props) {
+export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRefresh, onFinishReview, tabs, switcher }: Props) {
   useTick();
   const label = activity.isDraft && activity.state === "OPEN" ? "DRAFT" : activity.state;
   const dot = sync.fetching ? "bg-amber-400 animate-pulse" : sync.error ? "bg-rose-500" : "bg-emerald-500";
@@ -44,9 +46,7 @@ export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRef
               <span className="font-mono">{overview.headRefName}</span> → <span className="font-mono">{overview.baseRefName}</span>
             </span>
           </div>
-          <h1 className="truncate text-sm font-semibold">
-            {overview.title} <span className="font-normal text-stone-400">#{pr.number}</span>
-          </h1>
+          {switcher}
         </div>
         {tabs}
         {newCommits && (

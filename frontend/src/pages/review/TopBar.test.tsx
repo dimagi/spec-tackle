@@ -11,13 +11,14 @@ const sync = { fetching: false, error: null, lastSync: Date.now(), signedOut: fa
 function renderBar(over: Partial<Parameters<typeof TopBar>[0]> = {}) {
   return render(
     <TopBar pr={page.pr} overview={page.overview} activity={makeActivity()} viewer={page.viewer}
-      sync={sync} newCommits={false} onRefresh={() => {}} onFinishReview={() => {}} {...over} />,
+      sync={sync} newCommits={false} onRefresh={() => {}} onFinishReview={() => {}}
+      switcher={<h1>switcher</h1>} {...over} />,
   );
 }
 
-test("shows the PR title, repo and branches", () => {
+test("shows the PR switcher, repo and branches", () => {
   renderBar();
-  expect(screen.getByRole("heading")).toHaveTextContent("Add spec #7");
+  expect(screen.getByRole("heading")).toHaveTextContent("switcher");
   expect(screen.getByText("o/r")).toBeInTheDocument();
   expect(screen.getByText("spec")).toBeInTheDocument();
 });
@@ -36,7 +37,7 @@ test("sync status reads live, checking, failed or signed out", () => {
   const { rerender } = renderBar();
   expect(screen.getByTestId("sync-label")).toHaveTextContent("Live · just now");
   const props = { pr: page.pr, overview: page.overview, activity: makeActivity(), viewer: page.viewer,
-    newCommits: false, onRefresh: () => {}, onFinishReview: () => {} };
+    newCommits: false, onRefresh: () => {}, onFinishReview: () => {}, switcher: <h1>switcher</h1> };
   rerender(<TopBar {...props} sync={{ ...sync, fetching: true }} />);
   expect(screen.getByTestId("sync-label")).toHaveTextContent("Checking…");
   rerender(<TopBar {...props} sync={{ ...sync, error: "boom" }} />);

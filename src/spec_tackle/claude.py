@@ -275,6 +275,7 @@ async def ask(
     question: str,
     full_prompt: str,
     session_id: str | None,
+    system: str = SYSTEM_PROMPT,
     query=None,
 ) -> AsyncIterator[Event]:
     """Run one turn. Follow-ups resume the session; if it has expired, replay instead.
@@ -287,7 +288,7 @@ async def ask(
 
     run = query or sdk_query
     if session_id:
-        options = _options(cli=cli, cwd=cwd, resume=session_id)
+        options = _options(cli=cli, cwd=cwd, resume=session_id, system=system)
         try:
             async for event in _turn(run=run, prompt=question, options=options, root=cwd):
                 yield event
@@ -295,13 +296,13 @@ async def ask(
         except ResultError as exc:
             if "No conversation found" not in str(exc):
                 raise
-    options = _options(cli=cli, cwd=cwd, resume=None)
+    options = _options(cli=cli, cwd=cwd, resume=None, system=system)
     prompt = f"{snapshot}\n\n{full_prompt}"
     async for event in _turn(run=run, prompt=prompt, options=options, root=cwd):
         yield event
 
 
-def _options(*, cli: str, cwd: Path, resume: str | None):
+def _options(*, cli: str, cwd: Path, resume: str | None, system: str = SYSTEM_PROMPT):
     from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
     return ClaudeAgentOptions(
@@ -309,7 +310,7 @@ def _options(*, cli: str, cwd: Path, resume: str | None):
         cwd=str(cwd),
         tools=TOOLS,
         allowed_tools=TOOLS,
-        system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_PROMPT},
+        system_prompt={"type": "preset", "preset": "claude_code", "append": system},
         # Prompts carry PR text; don't let "@path" in it attach files or "/cmd" run commands.
         verbatim_prompts=True,
         setting_sources=["user"],

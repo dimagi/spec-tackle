@@ -56,6 +56,17 @@ export type PageFile = {
 
 export type PRInfo = { owner: string; repo: string; number: number; url: string };
 
+/** A PR in a list: the review queue or a repo's open PRs. */
+export type PrSummary = {
+  owner: string; repo: string; number: number; title: string;
+  author: string | null; updatedAt: string; isDraft: boolean; url: string;
+};
+
+export type Repo = {
+  owner: string; repo: string; description: string | null;
+  isPrivate: boolean; pushedAt: string | null; openPrs: number;
+};
+
 export type Overview = {
   title: string;
   url: string;
@@ -99,3 +110,29 @@ export type ClaudeThread = {
 };
 
 export type Session = { viewer: Viewer | null; ghCli: boolean; claude: boolean };
+
+export type LogicKind = "entry" | "step" | "decision" | "loop" | "async" | "exit";
+export type LogicChange = "added" | "changed" | "unchanged";
+export type FunctionRef = { path: string; symbol: string; start: number; end: number };
+
+export type LogicBlock = {
+  id: string; label: string; kind: LogicKind; change: LogicChange;
+  next: { to: string; label?: string }[];
+  children?: LogicBlock[];
+  functions?: FunctionRef[];
+};
+
+export type LogicMap = { id: string; headSha: string; summary: string; blocks: LogicBlock[]; createdAt: string };
+
+/** GET/POST …/logic. `head` comes back from POST: the commit the run is for. */
+export type LogicState = { available: boolean; map: LogicMap | null; stale: boolean; running: boolean; error?: string | null; head?: string };
+
+export type LogicFunction = FunctionRef & {
+  lines: { n: number; html: string; changed: boolean }[];
+  inDiff: boolean;
+  /** The step (leaf block) this function belongs to; a parent block shows all its steps' code. */
+  step: string;
+  missing?: string;
+};
+
+export type LogicFunctions = { label: string; headSha: string; functions: LogicFunction[] };

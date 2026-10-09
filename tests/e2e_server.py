@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -15,7 +16,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from spec_tackle import claude_api  # noqa: E402
+from spec_tackle import claude_api, logic  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
 from spec_tackle.auth import NotSignedIn  # noqa: E402
 from spec_tackle.claude import Event  # noqa: E402
@@ -28,6 +29,7 @@ HEAD = "e2e0000headsha"
 DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff.\n\n## Limits\n\nAt most five tries.\n"
 ME = {"__typename": "User", "login": "me", "avatarUrl": ""}
 ANN = {"__typename": "User", "login": "ann", "avatarUrl": ""}
+TITLES = {7: "Retry failed form submissions", 8: "Rename the sync queue"}
 ids = itertools.count(1000)
 
 
@@ -53,19 +55,22 @@ class FakeGitHub:
         self.reviews: list[dict] = []
         self.posted: list[dict] = []
 
-    def _activity(self) -> dict:
+    def _activity(self, pr) -> dict:
+        # Only PR 7 has comments, so a second PR shows whether state leaks between them.
+        threads = self.threads if pr.number == 7 else []
         return {"headRefOid": self.head, "state": "OPEN", "isDraft": False, "merged": False, "viewer": {"login": "me", "avatarUrl": ""},
-                "reviewThreads": {"nodes": self.threads}, "comments": {"nodes": self.conversation},
+                "reviewThreads": {"nodes": threads}, "comments": {"nodes": self.conversation},
                 "reviews": {"nodes": self.reviews}}
 
     async def overview(self, pr):
-        return {"title": "Retry failed form submissions", "number": 7, "url": "https://github.com/o/r/pull/7",
+        return {"title": TITLES.get(pr.number, f"PR {pr.number}"), "number": pr.number,
+                "url": f"https://github.com/o/r/pull/{pr.number}",
                 "body": "Adds retries.", "bodyHTML": "<p>Adds retries.</p>", "author": ANN, "createdAt": "2026-10-08T08:00:00Z",
                 "updatedAt": "", "baseRefName": "main", "headRefName": "retry", "additions": 9, "deletions": 0,
-                "changedFiles": 1, "reviewDecision": None, **self._activity()}
+                "changedFiles": 1, "reviewDecision": None, **self._activity(pr)}
 
     async def activity(self, pr):
-        return self._activity()
+        return self._activity(pr)
 
     async def files(self, pr):
         patch = "@@ -0,0 +1,9 @@\n" + "\n".join(f"+{line}" for line in DOC.rstrip("\n").split("\n"))
@@ -100,6 +105,19 @@ class FakeGitHub:
         state = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(event, "COMMENTED")
         self.reviews.append({**r, "state": state, "submittedAt": r["createdAt"]})
         return {"id": r["databaseId"]}
+
+    async def repos(self, query=""):
+        return [{"owner": "o", "repo": "r", "description": "Form submission specs", "isPrivate": False,
+                 "pushedAt": "2026-10-08T09:00:00Z", "openPrs": 2}]
+
+    async def open_pulls(self, owner, repo):
+        return [{"owner": owner, "repo": repo, "number": n, "title": TITLES[n], "author": "ann",
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": f"https://github.com/{owner}/{repo}/pull/{n}"}
+                for n in (8, 7)]
+
+    async def review_requests(self):
+        return [{"owner": "o", "repo": "r", "number": 8, "title": TITLES[8], "author": "ann",
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]
 
     async def set_thread_resolved(self, thread_id, resolved):
         for t in self.threads:
@@ -166,8 +184,29 @@ class FakeCheckouts:
 ANSWER = " ".join(["Retries back off exponentially from one second, doubling each time."] * 12)
 
 
+LOGIC_MAP = {
+    "summary": "Failed form submissions are retried with backoff, at most five times.",
+    "blocks": [
+        {"id": "send", "label": "Form is sent", "kind": "entry", "change": "unchanged", "next": [{"to": "retry"}]},
+        {"id": "retry", "label": "Retry failures", "kind": "loop", "change": "added", "next": [{"to": "give-up", "label": "5 tries"}],
+         "children": [
+             {"id": "backoff", "label": "Back off and resend", "kind": "step", "change": "added", "next": [],
+              "functions": [{"path": "docs/retry.md", "symbol": "Retry policy", "start": 5, "end": 5}]},
+         ]},
+        {"id": "give-up", "label": "Give up", "kind": "exit", "change": "added", "next": [],
+         "functions": [{"path": "docs/retry.md", "symbol": "Limits", "start": 7, "end": 9}]},
+    ],
+}
+
+
 async def fake_ask(**kwargs):
-    """Claude, streaming a long answer over about 1.5 seconds."""
+    """Claude, streaming a long answer over about 1.5 seconds; or a logic map, for the Logic view."""
+    if kwargs.get("system") == logic.LOGIC_SYSTEM_PROMPT:
+        yield Event(kind="tool", text="Reading docs/retry.md")
+        await asyncio.sleep(0.3)
+        answer = f"```json\n{json.dumps(LOGIC_MAP)}\n```"
+        yield Event(kind="done", text=answer, session_id="e2e-logic")
+        return
     yield Event(kind="tool", text="Reading docs/retry.md")
     for word in ANSWER.split(" "):
         await asyncio.sleep(0.015)

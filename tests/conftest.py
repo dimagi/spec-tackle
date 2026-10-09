@@ -55,6 +55,19 @@ class FakeGitHub:
     async def raw_file(self, owner, repo, path, ref):
         return b"# Title\n\ntwo\nthree\n"
 
+    async def repos(self, query=""):
+        self.repo_queries = [*getattr(self, "repo_queries", []), query]
+        return [{"owner": "o", "repo": "r", "description": "Specs", "isPrivate": False,
+                 "pushedAt": "2026-10-08T09:00:00Z", "openPrs": 2}]
+
+    async def open_pulls(self, owner, repo):
+        return [{"owner": owner, "repo": repo, "number": 8, "title": "Next spec", "author": "ann",
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": f"https://github.com/{owner}/{repo}/pull/8"}]
+
+    async def review_requests(self):
+        return [{"owner": "o", "repo": "r", "number": 8, "title": "Next spec", "author": "ann",
+                 "updatedAt": "2026-10-08T09:00:00Z", "isDraft": False, "url": "https://github.com/o/r/pull/8"}]
+
 
 class FakeSession:
     def __init__(self, login="me"):
@@ -105,13 +118,15 @@ class FakeAsk:
         self.calls = []
         self.delay = 0.05
         self.answer = "The answer."
+        self.answers = []  # consumed one per call before falling back to `answer`
 
     async def __call__(self, **kwargs):
         self.calls.append(kwargs)
         yield Event(kind="tool", text="Reading docs/a.md")
         await asyncio.sleep(self.delay)
         yield Event(kind="text", text="The ")
-        yield Event(kind="done", text=self.answer, session_id=f"sess-{len(self.calls)}")
+        answer = self.answers.pop(0) if self.answers else self.answer
+        yield Event(kind="done", text=answer, session_id=f"sess-{len(self.calls)}")
 
 
 @pytest.fixture
