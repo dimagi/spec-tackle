@@ -469,3 +469,8 @@ html.dark .claude-error { color: #fca5a5; }
 .pr-chip { border-radius: 999px; border: 1px solid var(--card-border); padding: 2px 10px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .pr-chip:hover { color: var(--ink); background: rgba(120,113,108,.08); }
 .pr-chip.on { border-color: #f59e0b; background: rgba(251,191,36,.18); color: var(--ink); }
+.repo-select {
+  border-radius: 6px; border: 1px solid var(--card-border); background: transparent; color: var(--ink);
+  padding: 2px 6px; font-size: 12px; font-family: "JetBrains Mono", monospace;
+}
+.repo-select:focus { outline: none; border-color: #f59e0b; }

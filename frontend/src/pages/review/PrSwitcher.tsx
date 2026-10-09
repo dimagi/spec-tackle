@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { useReviewRequests } from "../../api/queries";
+import { useOpenPulls, useRepos, useReviewRequests } from "../../api/queries";
 import { Option, PrRow, Section, Status, useHighlight } from "../../components/Picker";
 import { HiddenByFilters, PrFilters } from "../../components/PrFilters";
 import { parsePrRef, prPath, samePr } from "../../lib/prRef";
 import { matchesPrFilters, usePrFilters } from "../../state/prFilters";
-import { loadRecents, removeRecent, type RecentPr } from "../../state/recents";
+import { loadRecents, recentRepos, removeRecent, type RecentPr } from "../../state/recents";
 import type { PRRef } from "../../state/storage";
 
 type Props = {
@@ -17,9 +17,18 @@ type Props = {
 };
 
 /** The top bar's PR title, which opens a list of PRs to switch to. */
+const repoKey = (r: { owner: string; repo: string }) => `${r.owner}/${r.repo}`;
+
 export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) {
   const navigate = useNavigate();
+  const filters = usePrFilters();
+  const [pickedOwner = "", pickedRepo = ""] = filters.repo?.split("/") ?? [];
   const requests = useReviewRequests(open);
+  const pulls = useOpenPulls(pickedOwner, pickedRepo, open && !!filters.repo);
+  const myRepos = useRepos("", open);
+  // Either your review requests, or one repo's open PRs.
+  const list = filters.repo ? pulls : requests;
+  const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [recents, setRecents] = useState<RecentPr[]>([]);
@@ -29,12 +38,26 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
   const query = pasted ? "" : text.trim().toLowerCase();
   const matches = (pr: PRRef, title: string) =>
     !query || `${pr.owner}/${pr.repo} #${pr.number} ${title}`.toLowerCase().includes(query);
-  const queue = requests.data ?? [];
-  const filters = usePrFilters();
+  const queue = list.data ?? [];
   const found = queue.filter((r) => matches(r, r.title));
   const requested = found.filter((r) => matchesPrFilters(r, filters));
   const hidden = found.length - requested.length;
-  const recent = recents.filter((r) => !queue.some((q) => samePr(q, r)) && matches(r, r.title));
+  const recent = recents.filter((r) =>
+    !queue.some((q) => samePr(q, r)) && matches(r, r.title) && (!filters.repo || repoKey(r) === filters.repo));
+
+  // Repos to pick from: this PR's, then ones you've been asked to review or visited, then yours on GitHub.
+  const repoChoices = [...new Set([
+    repoKey(current),
+    ...(requests.data ?? []).map(repoKey),
+    ...recentRepos().map(repoKey),
+    ...(myRepos.data ?? []).map(repoKey),
+    ...(filters.repo ? [filters.repo] : []),
+  ])];
+  const pickRepo = (repo: string) => {
+    filters.setRepo(repo || null);
+    setHighlight(0);
+    inputRef.current?.focus();
+  };
   const rows: PRRef[] = [...requested, ...recent];
   const { highlight, setHighlight, move } = useHighlight(rows.length);
 
@@ -78,14 +101,14 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
   );
 
   let queueBody: ReactNode;
-  if (requests.isPending) queueBody = <Status>Loading…</Status>;
-  else if (requests.error) queueBody = (
+  if (list.isPending) queueBody = <Status>Loading…</Status>;
+  else if (list.error) queueBody = (
     <Status>
-      Couldn't load review requests{" "}
-      <button type="button" className="font-semibold underline" onClick={() => requests.refetch()}>Retry</button>
+      {filters.repo ? `Couldn't load pull requests: ${(list.error as Error).message}` : "Couldn't load review requests"}{" "}
+      <button type="button" className="font-semibold underline" onClick={() => list.refetch()}>Retry</button>
     </Status>
   );
-  else if (!queue.length) queueBody = <Status>Nothing waiting on you</Status>;
+  else if (!queue.length) queueBody = <Status>{filters.repo ? "No open pull requests" : "Nothing waiting on you"}</Status>;
   else if (!found.length) queueBody = <Status>No matches</Status>;
   else queueBody = (
     <>
@@ -107,15 +130,22 @@ export function PrSwitcher({ current, open, onOpenChange, beforeLeave }: Props) 
       {open && (
         <div className="absolute left-0 top-full z-50 mt-2 w-[min(36rem,90vw)] rounded-xl border border-stone-200 bg-white p-2 shadow-xl dark:border-stone-700 dark:bg-stone-900">
           <input
-            autoFocus value={text} onKeyDown={onKeyDown}
+            ref={inputRef} autoFocus value={text} onKeyDown={onKeyDown}
             onChange={(e) => { setText(e.target.value); setError(null); setHighlight(0); }}
             aria-label="Pull request link or filter" placeholder="Paste a PR link or owner/repo#123, or type to filter"
             className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm outline-none ring-amber-400/40 placeholder:text-stone-400 focus:border-amber-500 focus:ring-4 dark:border-stone-700 dark:bg-stone-950"
           />
-          <PrFilters />
+          <div className="flex items-center justify-between gap-2">
+            <PrFilters />
+            <select aria-label="Repository" value={filters.repo ?? ""} onChange={(e) => pickRepo(e.target.value)}
+              className="repo-select mt-2 max-w-[16rem] truncate">
+              <option value="">Review requested</option>
+              {repoChoices.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
           {error && <p role="alert" className="px-2 pt-1 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
           <div role="listbox" aria-label="Pull requests" className="mt-2 max-h-[60vh] overflow-y-auto">
-            <Section title="Review requested">{queueBody}</Section>
+            <Section title={filters.repo ? `Open in ${filters.repo}` : "Review requested"}>{queueBody}</Section>
             {recent.length > 0 && (
               <Section title="Recent">
                 {recent.map((r, i) => option(r, requested.length + i, (

@@ -63,3 +63,15 @@ test("Back with an unsent comment asks first", async ({ page }) => {
   await expect(page).toHaveURL(/\/pr\/o\/r\/7$/);
   await expect(title).toContainText("Retry failed form submissions");
 });
+
+test("pick a repo in the switcher to see its open PRs", async ({ page }) => {
+  await page.goto("/pr/o/r/7");
+  await page.locator("header h1").getByRole("button").click();
+  await page.getByRole("combobox", { name: "Repository" }).selectOption("o/r");
+
+  const repo = page.getByRole("group", { name: "Open in o/r" });
+  await expect(repo.getByRole("option")).toHaveCount(3);
+  await expect(repo).not.toContainText("Offline mode");
+  await repo.getByRole("option", { name: /Bump the retry limit/ }).click();
+  await expect(page).toHaveURL(/\/pr\/o\/r\/10$/);
+});

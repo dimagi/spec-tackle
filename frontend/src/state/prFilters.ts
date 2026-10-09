@@ -6,6 +6,9 @@ export type StatusFilter = "open" | "draft";
 type PrFilters = {
   status: ReadonlySet<StatusFilter>;
   toggleStatus: (s: StatusFilter) => void;
+  /** The repo whose PRs the switcher lists, as "owner/repo"; null lists your review requests. */
+  repo: string | null;
+  setRepo: (repo: string | null) => void;
 };
 
 /**
@@ -20,6 +23,8 @@ export const usePrFilters = create<PrFilters>((set, get) => ({
     // Never turn both off: that would hide every PR.
     if (next.size) set({ status: next });
   },
+  repo: null,
+  setRepo: (repo) => set({ repo }),
 }));
 
 export function matchesPrFilters(pr: PrSummary, f: Pick<PrFilters, "status">): boolean {
