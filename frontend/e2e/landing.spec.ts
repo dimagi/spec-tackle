@@ -19,18 +19,16 @@ test("browse to a repo, open one of its PRs, and come back to the list", async (
   await expect(page.getByRole("listbox", { name: "Open pull requests" })).toContainText("Retry failed form submissions");
 });
 
-test("a repo's PRs: open, unapproved ones by default; the chips show drafts and approved ones", async ({ page }) => {
+test("a repo's PRs: open ones by default; the Draft chip shows drafts", async ({ page }) => {
   await page.goto("/?repo=o%2Fr");
   const list = page.getByRole("listbox", { name: "Open pull requests" });
-  await expect(list.getByRole("option")).toHaveCount(2);
-  await expect(list).toContainText("Rename the sync queue");
+  await expect(list.getByRole("option")).toHaveCount(3);
   await expect(list).toContainText("changes requested");
+  await expect(list).toContainText("approved");
   await expect(list).not.toContainText("Offline mode");
-  await expect(list).toContainText("2 pull requests more hidden by the filters");
+  await expect(list).toContainText("1 pull request more hidden by the filters");
 
   await page.getByRole("button", { name: "Draft", exact: true }).click();
-  await page.getByRole("button", { name: "Approved", exact: true }).click();
   await expect(list.getByRole("option")).toHaveCount(4);
   await expect(list).toContainText("Offline mode");
-  await expect(list).toContainText("approved");
 });

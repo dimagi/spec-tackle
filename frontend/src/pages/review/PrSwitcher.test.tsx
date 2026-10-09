@@ -66,13 +66,12 @@ test("lists review requests, then recents not already listed, with the current P
   setup();
   const requested = within(screen.getByRole("group", { name: "Review requested" }));
   expect(await requested.findByText("Sync queue")).toBeInTheDocument();
+  expect(requested.getByText("Signed off")).toBeInTheDocument();
   expect(requested.queryByText("Draft thing")).toBeNull();
-  expect(requested.getByText("2 pull requests more hidden by the filters")).toBeInTheDocument();
+  expect(requested.getByText("1 pull request more hidden by the filters")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Draft" }));
-  await userEvent.click(screen.getByRole("button", { name: "Approved" }));
   expect(requested.getByText("Draft thing")).toBeInTheDocument();
   expect(requested.getByText("draft")).toBeInTheDocument();
-  expect(requested.getByText("Signed off")).toBeInTheDocument();
 
   const recent = within(screen.getByRole("group", { name: "Recent" }));
   expect(recent.getByText("Add spec")).toBeInTheDocument();

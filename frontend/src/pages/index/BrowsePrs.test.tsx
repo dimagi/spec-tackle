@@ -164,29 +164,28 @@ test("nothing found says so", async () => {
   await waitFor(() => expect(screen.getByText("No repositories found")).toBeInTheDocument());
 });
 
-test("by default only open PRs that aren't approved show; the chips bring back the rest", async () => {
+test("by default only open PRs show; the Draft chip brings drafts back", async () => {
   serve({ "/api/repos/dimagi/connect/pulls": { body: [
     pr(5, "Retry spec"), pr(6, "Draft thing", { isDraft: true }),
     pr(7, "Signed off", { review: "approved" }), pr(8, "Needs work", { review: "changes_requested" }),
   ] } });
   setup("/?repo=dimagi/connect");
   await screen.findByText("Retry spec");
-  expect(optionTexts()).toEqual([expect.stringContaining("Retry spec"), expect.stringContaining("Needs work")]);
-  expect(screen.getByText("changes requested")).toBeInTheDocument();
-  expect(screen.getByText("2 pull requests more hidden by the filters")).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole("button", { name: "Approved" }));
-  expect(screen.getByRole("button", { name: "Approved" })).toHaveAttribute("aria-pressed", "true");
-  expect(optionTexts()).toHaveLength(3);
+  expect(optionTexts()).toEqual([
+    expect.stringContaining("Retry spec"), expect.stringContaining("Signed off"), expect.stringContaining("Needs work"),
+  ]);
   expect(screen.getByText("approved")).toBeInTheDocument();
-
-  // Only approved, open PRs; turning off the last chip in a group does nothing.
-  await userEvent.click(screen.getByRole("button", { name: "Not approved" }));
-  await userEvent.click(screen.getByRole("button", { name: "Approved" }));
-  expect(optionTexts()).toEqual([expect.stringContaining("Signed off")]);
+  expect(screen.getByText("changes requested")).toBeInTheDocument();
+  expect(screen.getByText("1 pull request more hidden by the filters")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "Draft" }));
+  expect(screen.getByRole("button", { name: "Draft" })).toHaveAttribute("aria-pressed", "true");
+  expect(optionTexts()).toHaveLength(4);
+
+  // Only drafts; turning off the last chip does nothing.
   await userEvent.click(screen.getByRole("button", { name: "Open" }));
-  expect(screen.queryAllByRole("option")).toEqual([]);
-  expect(screen.getByText("4 pull requests hidden by the filters")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Draft" }));
+  expect(optionTexts()).toEqual([expect.stringContaining("Draft thing")]);
+  expect(screen.getByText("3 pull requests more hidden by the filters")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Approved" })).toBeNull();
 });

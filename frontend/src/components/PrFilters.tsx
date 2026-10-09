@@ -1,12 +1,11 @@
-import { usePrFilters, type ReviewFilter, type StatusFilter } from "../state/prFilters";
+import { usePrFilters, type StatusFilter } from "../state/prFilters";
 import { Status } from "./Picker";
 
 const STATUS: { value: StatusFilter; label: string }[] = [{ value: "open", label: "Open" }, { value: "draft", label: "Draft" }];
-const REVIEW: { value: ReviewFilter; label: string }[] = [{ value: "unapproved", label: "Not approved" }, { value: "approved", label: "Approved" }];
 
-/** Quick filters for the PR lists: open or draft, approved or not. */
+/** Quick filters for the PR lists: open or draft. */
 export function PrFilters() {
-  const { status, review, toggleStatus, toggleReview } = usePrFilters();
+  const { status, toggleStatus } = usePrFilters();
   const chip = (label: string, on: boolean, toggle: () => void) => (
     <button key={label} type="button" aria-pressed={on} onClick={toggle}
       // Keep focus in the filter box, so typing and the arrow keys keep working.
@@ -16,14 +15,8 @@ export function PrFilters() {
     </button>
   );
   return (
-    <div className="flex flex-wrap items-center gap-1.5 px-1 pt-2" aria-label="Filter pull requests by state">
-      <div role="group" aria-label="Status" className="flex gap-1">
-        {STATUS.map((s) => chip(s.label, status.has(s.value), () => toggleStatus(s.value)))}
-      </div>
-      <span className="mx-1 h-4 w-px bg-stone-200 dark:bg-stone-700" aria-hidden="true" />
-      <div role="group" aria-label="Review" className="flex gap-1">
-        {REVIEW.map((r) => chip(r.label, review.has(r.value), () => toggleReview(r.value)))}
-      </div>
+    <div role="group" aria-label="Status" className="flex gap-1 px-1 pt-2">
+      {STATUS.map((s) => chip(s.label, status.has(s.value), () => toggleStatus(s.value)))}
     </div>
   );
 }
