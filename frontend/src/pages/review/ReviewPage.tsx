@@ -363,7 +363,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   // Clicking a highlighted passage activates its thread (cycling if several share it).
   const onDocClick = (e: React.MouseEvent) => {
     const target = e.target as Element;
-    if (target.closest("a, button, summary, input, textarea")) return;
+    // A reference marker jumps to its target instead (see DocRefs).
+    if (target.closest("a, button, summary, input, textarea, .doc-ref")) return;
     if (!getSelection()?.isCollapsed) return;
     const anchor = target.closest(".has-thread, .has-claude");
     const list = anchor ? engineRef.current?.threadsAt(anchor) ?? [] : [];
@@ -382,6 +383,15 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     }
   };
 
+  // Find references in every document automatically: chosen per PR.
+  const [autoRefs, setAutoRefs] = useState(() => loadPref(pr, "autoRefs", false));
+  const toggleAutoRefs = () => {
+    savePref(pr, "autoRefs", !autoRefs);
+    setAutoRefs(!autoRefs);
+  };
+  const refsTarget = useMemo(() => ({ pr, head: renderedSha, auto: autoRefs }), [pr, renderedSha, autoRefs]);
+  const hasDocs = page.files.some((f) => f.rendered);
+
   const ctx: ReviewPageContext = {
     page, pr, api, activity, fresh: seenState.fresh,
     markSeen,
@@ -398,6 +408,14 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         onFinishReview={() => setReviewOpen(true)}
         tabs={page.claude && (
           <PageTabs tabs={[{ id: "review", label: "Code view" }, { id: "logic", label: "Logic view" }]} active={tab} onSelect={setTab} />
+        )}
+        settings={page.claude && hasDocs && (
+          <button type="button" role="switch" aria-checked={autoRefs} onClick={toggleAutoRefs}
+            className="auto-refs flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-200/70 dark:text-stone-300 dark:hover:bg-stone-800"
+            title="Find references in every document in this PR, and in lines changed by new commits, without asking">
+            <span className="auto-refs-track" aria-hidden="true"><span /></span>
+            Auto-find references
+          </button>
         )}
         switcher={
           <PrSwitcher current={{ ...pr, title: page.overview.title }} open={switcherOpen}
@@ -421,7 +439,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
               })} />
               <Description overview={page.overview} />
               {page.files.map((file, i) => (
-                <FileSection key={file.path} file={file} index={i + 1} view={viewChoices[file.path]} onViewChange={(path, view) => setViewChoices((v) => ({ ...v, [path]: view }))} />
+                <FileSection key={file.path} file={file} index={i + 1} view={viewChoices[file.path]} onViewChange={(path, view) => setViewChoices((v) => ({ ...v, [path]: view }))}
+                  refs={page.claude ? refsTarget : undefined} />
               ))}
               <Conversation items={activity.conversation} fresh={seenState.fresh} hideBots={hideBots} onPost={postConversation} />
             </main>
