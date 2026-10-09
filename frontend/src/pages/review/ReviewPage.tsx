@@ -18,7 +18,7 @@ import { ReviewPageCtx, type ReviewPageContext } from "./context";
 import { Conversation } from "./Conversation";
 import { FinishReview, type ReviewEvent } from "./FinishReview";
 import { Description } from "./Description";
-import { defaultView, FileSection, viewForLine, type FileView } from "./FileSection";
+import { defaultView, FileSection, showsLine, viewForLine, type FileView, type RefsTarget } from "./FileSection";
 import { useClaudeStreams } from "./hooks/claudeStream";
 import { useKeyboard } from "./hooks/useKeyboard";
 import type { MarginEngine } from "./hooks/useMarginEngine";
@@ -389,7 +389,17 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     savePref(pr, "autoRefs", !autoRefs);
     setAutoRefs(!autoRefs);
   };
-  const refsTarget = useMemo(() => ({ pr, head: renderedSha, auto: autoRefs }), [pr, renderedSha, autoRefs]);
+  const refsTarget = useMemo<RefsTarget>(() => ({
+    pr, head: renderedSha, auto: autoRefs,
+    show: (path, line) => {
+      const file = page.files.find((f) => f.path === path);
+      if (!file || !showsLine(file, line)) return false;
+      const view = viewForLine(file, line);
+      setViewChoices((v) => ({ ...v, [path]: view }));
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollToLine(path, line, view)));
+      return true;
+    },
+  }), [pr, renderedSha, autoRefs, page.files]);
   const hasDocs = page.files.some((f) => f.rendered);
 
   const ctx: ReviewPageContext = {

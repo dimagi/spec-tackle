@@ -13,7 +13,15 @@ type Props = {
   view?: FileView;
   onViewChange?: (path: string, view: FileView) => void;
   /** Set when Claude is available: offers "Find references" on a rendered document. */
-  refs?: { pr: PRRef; head: string; auto: boolean };
+  refs?: RefsTarget;
+};
+
+export type RefsTarget = {
+  pr: PRRef;
+  head: string;
+  auto: boolean;
+  /** Scroll to a line of a file on this page, switching its view if needed; false if no view shows it. */
+  show: (path: string, line: number) => boolean;
 };
 
 /** Whether a file can switch between Document and Changes. */
@@ -30,6 +38,11 @@ export function defaultView(file: PageFile): FileView {
 export function viewForLine(file: PageFile, line: number): FileView {
   if (!hasViewToggle(file)) return defaultView(file);
   return file.hunks.some(([start, end]) => start <= line && line <= end) ? "diff" : "rendered";
+}
+
+/** Whether one of the file's views shows `line`: the document shows every line, the changes only their hunks. */
+export function showsLine(file: PageFile, line: number): boolean {
+  return viewForLine(file, line) === "rendered" || file.hunks.some(([start, end]) => start <= line && line <= end);
 }
 
 export function FileSection({ file, index, view: chosen, onViewChange, refs }: Props) {
@@ -52,7 +65,7 @@ export function FileSection({ file, index, view: chosen, onViewChange, refs }: P
         <span className="font-mono text-xs text-rose-600">−{file.deletions}</span>
         <div className="ml-auto flex min-w-0 items-center gap-3">
           {refs && file.rendered && (
-            <DocRefs pr={refs.pr} path={file.path} head={refs.head} auto={refs.auto}
+            <DocRefs pr={refs.pr} path={file.path} head={refs.head} auto={refs.auto} show={refs.show}
               active={view === "rendered"} section={sectionRef} />
           )}
           {toggle && (

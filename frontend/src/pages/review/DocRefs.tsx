@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { apiBase, docRefsKey, useDocRefs, useRefTarget } from "../../api/queries";
 import { request } from "../../api/request";
 import type { DocRef, DocRefsState } from "../../api/types";
+import { elementsInRange } from "../../lib/anchors";
 import { clearRefs, markRefs, targetCopy } from "../../lib/docRefs";
 import { scrollToLine } from "../../lib/scrollToLine";
 import type { PRRef } from "../../state/storage";
@@ -20,6 +21,8 @@ type Props = {
   /** Whether the document is the view on show; markers only go in it then. */
   active: boolean;
   section: RefObject<HTMLElement | null>;
+  /** Scroll to a line of a file on this page, switching its view if needed; false if no view shows it. */
+  show: (path: string, line: number) => boolean;
 };
 
 type Scope = "full" | "changed";
@@ -36,7 +39,7 @@ const HIDE_DELAY = 200;
  * changed since are checked on request, or straight away when `auto` is on.
  * See docs/specs/2026-10-09-doc-references-design.md.
  */
-export function DocRefs({ pr, path, head, auto, active, section }: Props) {
+export function DocRefs({ pr, path, head, auto, active, section, show }: Props) {
   const query = useDocRefs(pr, path, head);
   const queryClient = useQueryClient();
   const [running, setRunning] = useState(false);
@@ -60,20 +63,24 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
     if (!running) return;
     const params = `path=${encodeURIComponent(path)}&head=${encodeURIComponent(head)}`;
     const source = new EventSource(`${api}/refs/events?${params}`);
-    const end = () => {
+    const key = docRefsKey(pr, path, head);
+    const end = async (checkError = false) => {
       source.close();
       setRunning(false);
-      queryClient.invalidateQueries({ queryKey: docRefsKey(pr, path, head) });
+      await queryClient.invalidateQueries({ queryKey: key });
+      // A run can end before this stream joins it; its error then comes with the state.
+      const error = checkError && queryClient.getQueryData<DocRefsState>(key)?.error;
+      if (error) toast(error, { kind: "error", timeout: 8000 });
     };
     source.onmessage = (e) => {
       const event = JSON.parse(e.data) as { type: string; text?: string };
       if (event.type === "tool") setProgress(event.text ?? "Working…");
       else {
         if (event.type === "error") toast(event.text ?? "Finding references failed", { kind: "error", timeout: 8000 });
-        end();
+        end(event.type === "idle");
       }
     };
-    source.onerror = end;
+    source.onerror = () => end();
     return () => source.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, api, path, head]);
@@ -115,7 +122,7 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
     const jump = (span: HTMLElement) => {
       clearTimeout(timer.current);
       setPopup(null);
-      goTo({ pr, head, path, ref: refOf(span) });
+      goTo({ pr, head, path, ref: refOf(span), show });
     };
     const onOver = (e: Event) => {
       const span = marker(e.target);
@@ -155,7 +162,7 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
       el.removeEventListener("keydown", onKey);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, path, pr, head]);
+  }, [current, path, pr, head, show]);
 
   // The popup is placed against the page as it was; scrolling the page closes it.
   useEffect(() => {
@@ -194,8 +201,9 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
   }, [auto, data, running, head]);
 
   if (!data?.available) return null;
+  const failed = data.error ? `Last try failed: ${data.error}` : "";
   const again = (
-    <button type="button" className="nav-btn" title="Find references again" aria-label="Find references again" onClick={() => generate("full")}>↻</button>
+    <button type="button" className="nav-btn" title={failed || "Find references again"} aria-label="Find references again" onClick={() => generate("full")}>↻</button>
   );
   let control;
   if (running) {
@@ -223,7 +231,7 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
         )}
         {changed > 0 && (
           <button type="button" className="nav-btn" onClick={() => generate("changed")}
-            title={`Look for references in the lines changed since ${current.basedOn?.slice(0, 7)}.${outdated}`}>
+            title={failed || `Look for references in the lines changed since ${current.basedOn?.slice(0, 7)}.${outdated}`}>
             Check {changed} changed line{changed === 1 ? "" : "s"}
           </button>
         )}
@@ -231,8 +239,8 @@ export function DocRefs({ pr, path, head, auto, active, section }: Props) {
       </>
     );
   } else {
-    const title = data.error
-      ? `Last try failed: ${data.error}`
+    const title = failed
+      ? failed
       : data.stale && data.refs
         ? `Found for ${data.refs.headSha.slice(0, 7)}; this page shows ${head.slice(0, 7)}`
         : "Ask Claude to mark phrases that point at other parts of this file";
@@ -264,16 +272,18 @@ const WIDTH = 448;
 const MAX_HEIGHT = 320;
 
 /**
- * Show a reference's target: on this page when it's in a file shown here, otherwise
- * on GitHub in a new tab.
+ * Show a reference's target: on this page when a view of its file shows the line (the
+ * view on show first), otherwise on GitHub in a new tab.
  */
-function goTo({ pr, head, path, ref }: { pr: PRRef; head: string; path: string; ref: DocRef }) {
+function goTo({ pr, head, path, ref, show }: {
+  pr: PRRef; head: string; path: string; ref: DocRef; show: (path: string, line: number) => boolean;
+}) {
   const target = ref.targetPath ?? path;
   const section = document.querySelector<HTMLElement>(`section.file[data-path="${CSS.escape(target)}"]`);
-  if (section) {
-    const shown = section.querySelector<HTMLElement>(".view:not([hidden])")?.dataset.view;
-    scrollToLine(target, ref.targetStart, shown === "diff" ? "diff" : "rendered");
-  } else {
+  const shown = section?.querySelector<HTMLElement>(".view:not([hidden])");
+  if (shown && elementsInRange(shown, ref.targetStart, ref.targetEnd).length) {
+    scrollToLine(target, ref.targetStart, shown.dataset.view === "diff" ? "diff" : "rendered");
+  } else if (!show(target, ref.targetStart)) {
     window.open(githubLines(pr, head, target, ref), "_blank", "noopener");
   }
 }

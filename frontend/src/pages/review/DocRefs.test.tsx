@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import type { DocRefs as DocRefsData, DocRefsState } from "../../api/types";
 import { scrollToLine } from "../../lib/scrollToLine";
+import { useToasts } from "../../state/toasts";
 import { makeFile } from "../../test/fixtures";
 import { FileSection } from "./FileSection";
 
@@ -33,8 +34,13 @@ const GET = `GET /api/pr/o/r/7/refs?path=docs%2Fa.md&head=${HEAD}`;
 let routes: Record<string, unknown>;
 let calls: { key: string; body?: string }[];
 
+let show: ReturnType<typeof vi.fn<(path: string, line: number) => boolean>>;
+
 beforeEach(() => {
   FakeEventSource.instances = [];
+  show = vi.fn(() => false);
+  vi.mocked(scrollToLine).mockClear();
+  useToasts.setState({ toasts: [] });
   vi.stubGlobal("EventSource", FakeEventSource);
   calls = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -55,7 +61,7 @@ function setup({ auto = false } = {}) {
   const file = makeFile({ wholeFile: true, status: "added", rendered: HTML });
   return render(
     <QueryClientProvider client={client}>
-      <FileSection file={file} index={1} refs={{ pr: PR, head: HEAD, auto }} />
+      <FileSection file={file} index={1} refs={{ pr: PR, head: HEAD, auto, show }} />
     </QueryClientProvider>,
   );
 }
@@ -159,18 +165,61 @@ test("clicking a reference to a file that isn't on the page opens it on GitHub",
   expect(scrollToLine).not.toHaveBeenCalledWith("app/codes.py", 2, expect.anything());
 });
 
-test("clicking a reference to a file on the page scrolls to it in the view it shows", async () => {
-  routes = { [GET]: state({ refs: ELSEWHERE }) };
-  const { container } = setup();
+function otherFile(diff: string) {
   const other = document.createElement("section");
   other.className = "file";
   other.dataset.path = "app/codes.py";
-  other.innerHTML = `<div class="view" data-view="diff"></div>`;
+  other.innerHTML = `<div class="view" data-view="diff">${diff}</div>`;
   document.body.append(other);
+  return other;
+}
+
+test("clicking a reference to a file on the page scrolls to it in the view it shows", async () => {
+  routes = { [GET]: state({ refs: ELSEWHERE }) };
+  const { container } = setup();
+  const other = otherFile(`<div data-ls="2" data-le="2">MAX_TRIES = 5</div>`);
   await screen.findByRole("button", { name: "1 reference" });
   fireEvent.click(container.querySelector(".doc-ref")!);
   expect(scrollToLine).toHaveBeenCalledWith("app/codes.py", 2, "diff");
+  expect(show).not.toHaveBeenCalled();
   other.remove();
+});
+
+test("a target outside the lines the view shows is handed to the page, then GitHub", async () => {
+  routes = { [GET]: state({ refs: ELSEWHERE }) };
+  const open = vi.fn();
+  vi.stubGlobal("open", open);
+  const { container } = setup();
+  const other = otherFile(`<div data-ls="40" data-le="45">elsewhere</div>`);
+  await screen.findByRole("button", { name: "1 reference" });
+
+  show.mockReturnValue(true);  // the page can switch to a view that shows it
+  fireEvent.click(container.querySelector(".doc-ref")!);
+  expect(show).toHaveBeenCalledWith("app/codes.py", 2);
+  expect(scrollToLine).not.toHaveBeenCalledWith("app/codes.py", 2, expect.anything());
+  expect(open).not.toHaveBeenCalled();
+
+  show.mockReturnValue(false);  // no view shows it
+  fireEvent.click(container.querySelector(".doc-ref")!);
+  expect(open).toHaveBeenCalledWith(`https://github.com/o/r/blob/${HEAD}/app/codes.py#L2-L3`, "_blank", "noopener");
+  other.remove();
+});
+
+test("a run that failed before its progress was followed still shows its error", async () => {
+  let current = state();
+  routes = { [GET]: () => current, "POST /api/pr/o/r/7/refs": state({ running: true }) };
+  setup();
+  await userEvent.click(await screen.findByRole("button", { name: "Find references" }));
+  current = state({ error: "docs/a.md isn't in the checkout" });
+  FakeEventSource.instances[0].send({ type: "idle" });
+  await waitFor(() => expect(useToasts.getState().toasts[0]?.message).toBe("docs/a.md isn't in the checkout"));
+});
+
+test("a failed run on a document with references says so on its buttons", async () => {
+  routes = { [GET]: state({ refs: { ...FOUND, pending: [3] }, error: "boom" }) };
+  setup();
+  expect(await screen.findByRole("button", { name: "Find references again" })).toHaveAttribute("title", "Last try failed: boom");
+  expect(screen.getByRole("button", { name: "Check 1 changed line" })).toHaveAttribute("title", "Last try failed: boom");
 });
 
 const POST = "POST /api/pr/o/r/7/refs";
@@ -218,7 +267,7 @@ test("markers stay out of the Changes view", async () => {
   const file = makeFile({ rendered: HTML });  // modified: opens on Changes
   const { container } = render(
     <QueryClientProvider client={client}>
-      <FileSection file={file} index={1} refs={{ pr: PR, head: HEAD, auto: false }} />
+      <FileSection file={file} index={1} refs={{ pr: PR, head: HEAD, auto: false, show }} />
     </QueryClientProvider>,
   );
   await screen.findByRole("button", { name: "1 reference" });
