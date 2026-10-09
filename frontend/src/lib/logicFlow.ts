@@ -68,10 +68,10 @@ export async function layoutFlow(
       type: group ? "box" : "card",
       // ELK gives positions relative to the parent, which is what React Flow wants for child nodes.
       position: { x: n.x ?? 0, y: n.y ?? 0 },
-      ...(parentId ? { parentId, extent: "parent" as const } : {}),
+      // A step dragged past its group's edge grows the group rather than leaving it.
+      ...(parentId ? { parentId, expandParent: true } : {}),
       style: { width: n.width, height: n.height },
       data: { block: byId.get(n.id)!, direction },
-      draggable: false,
       selectable: false,
       focusable: false,
     });
