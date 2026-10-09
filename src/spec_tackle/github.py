@@ -195,7 +195,11 @@ class GitHub:
     # -- transport ---------------------------------------------------------
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
-        response = await self._client.request(method, url, **kwargs)
+        try:
+            response = await self._client.request(method, url, **kwargs)
+        except httpx.TransportError as exc:
+            # Dropped connections and timeouts: report them like any other GitHub failure.
+            raise GitHubError(f"Couldn't reach GitHub ({type(exc).__name__}). Try again.", 502) from exc
         if response.status_code >= 400:
             try:
                 data = response.json()

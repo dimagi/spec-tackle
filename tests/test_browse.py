@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 
 from spec_tackle.app import app
@@ -101,3 +102,22 @@ def test_browse_endpoints_when_signed_out_say_so(web_app):
         response = web_app.get(url)
         assert response.status_code == 401
         assert response.json()["signedOut"] is True
+
+
+def test_network_failure_becomes_github_error():
+    def drop_connection(request):
+        raise httpx.ReadError("connection reset", request=request)
+
+    async def call():
+        client = GitHub("tok")
+        client._client = httpx.AsyncClient(base_url="https://api.github.com",
+                                           transport=httpx.MockTransport(drop_connection))
+        try:
+            await client.repos()
+        finally:
+            await client.aclose()
+
+    with pytest.raises(GitHubError) as caught:
+        asyncio.run(call())
+    assert caught.value.status == 502
+    assert "tok" not in str(caught.value)
