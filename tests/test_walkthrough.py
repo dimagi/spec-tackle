@@ -24,7 +24,8 @@ def answer(**over):
     return {
         "inputs": INPUTS,
         "steps": [step("send"), step("backoff", assumed=["The server is down"]),
-                  step("give-up", danger=[{"kind": "destructive", "note": "Deletes the form (app/retry.py:9)"}])],
+                  step("give-up", danger=[{"note": "Posts the form to an unknown host (app/retry.py:9)"}],
+                       effects=[{"kind": "destructive", "note": "Deletes the form (app/retry.py:9)"}])],
         "outcome": {"kind": "exit", "message": "Reached exit: Give up"},
         **over,
     }
@@ -46,8 +47,10 @@ def test_a_good_proposing_answer_passes_and_keeps_flags():
     assert result["inputs"] == INPUTS
     assert [s["blockId"] for s in result["steps"]] == ["send", "backoff", "give-up"]
     assert result["steps"][1]["assumed"] == ["The server is down"]
-    assert result["steps"][2]["danger"] == [{"kind": "destructive", "note": "Deletes the form (app/retry.py:9)"}]
-    assert "assumed" not in result["steps"][0] and "danger" not in result["steps"][0]
+    assert result["steps"][2]["danger"] == [{"note": "Posts the form to an unknown host (app/retry.py:9)"}]
+    assert result["steps"][2]["effects"] == [{"kind": "destructive", "note": "Deletes the form (app/retry.py:9)"}]
+    for key in ("assumed", "danger", "effects"):
+        assert key not in result["steps"][0]
     assert set(result) == {"inputs", "steps", "outcome"}
 
 
@@ -90,7 +93,8 @@ def test_rejects_bad_step_counts_and_blocks():
 
 
 def test_rejects_bad_step_fields():
-    s = step("send", note="", assumed=["a"] * 6, danger=[{"kind": "boom", "note": ""}] + [{"kind": "unsafe", "note": "n"}] * 5)
+    s = step("send", note="", assumed=["a"] * 6, danger=[{"note": "n"}] * 6,
+            effects=[{"kind": "unsafe", "note": "n"}] * 6)
     del s["output"]
     s["input"] = {"big": "x" * 5000}
     text = problems_for(answer(steps=[s], outcome={"kind": "stopped", "message": "?"}))
@@ -99,13 +103,48 @@ def test_rejects_bad_step_fields():
     assert "steps[0].input: must be at most 4096 bytes of JSON" in text
     assert "steps[0].assumed: at most 5" in text
     assert "steps[0].danger: at most 5" in text
+    assert "steps[0].effects: at most 5" in text
 
 
 def test_rejects_bad_danger_flags():
-    s = step("send", danger=[{"kind": "boom", "note": "n"}, {"kind": "unsafe", "note": "x" * 201}])
+    s = step("send", danger=[{"note": ""}, {"note": "x" * 201}, "nope"])
     text = problems_for(answer(steps=[s], outcome={"kind": "stopped", "message": "?"}))
-    assert "steps[0].danger[0].kind: must be one of destructive, external, unsafe, irreversible" in text
+    assert "steps[0].danger[0].note: must be 1 to 200 characters" in text
     assert "steps[0].danger[1].note: must be 1 to 200 characters" in text
+    assert "steps[0].danger[2]: must be an object" in text
+
+
+def test_danger_keeps_only_the_note():
+    s = step("send", danger=[{"kind": "external", "note": "Steals keys (a.py:1)"}])
+    result, problems = walk.validate_trace(
+        answer(steps=[s], outcome={"kind": "stopped", "message": "?"}), blocks=BLOCKS, entry_id="send", inputs=None)
+    assert problems == []
+    assert result["steps"][0]["danger"] == [{"note": "Steals keys (a.py:1)"}]
+
+
+def test_effects_are_kept_with_kind_and_note():
+    kinds = [{"kind": k, "note": f"does {k}"} for k in walk.EFFECT_KINDS]
+    result, problems = walk.validate_trace(
+        answer(steps=[step("send", effects=kinds)], outcome={"kind": "stopped", "message": "?"}),
+        blocks=BLOCKS, entry_id="send", inputs=None)
+    assert problems == [] and result["steps"][0]["effects"] == kinds
+
+
+def test_rejects_bad_effects():
+    s = step("send", effects=[{"kind": "external", "note": "ok"}, {"kind": "boom", "note": "n"},
+                              {"kind": "unsafe", "note": "x" * 201}, {"kind": "unsafe", "note": ""}, 7])
+    text = problems_for(answer(steps=[s], outcome={"kind": "stopped", "message": "?"}))
+    assert "steps[0].effects[1].kind: must be one of external, destructive, unsafe, irreversible" in text
+    assert "steps[0].effects[2].note: must be 1 to 200 characters" in text
+    assert "steps[0].effects[3].note: must be 1 to 200 characters" in text
+    assert "steps[0].effects[4]: must be an object" in text
+    assert "steps[0].effects[0]" not in text
+
+
+def test_non_list_danger_and_effects_are_problems_not_crashes():
+    text = problems_for(answer(steps=[step("send", danger="x", effects={"a": 1})],
+                               outcome={"kind": "stopped", "message": "?"}))
+    assert "steps[0].danger: at most 5" in text and "steps[0].effects: at most 5" in text
 
 
 def test_rejects_bad_outcomes():
@@ -137,10 +176,12 @@ def test_requests_carry_the_map_entry_and_inputs_verbatim():
     assert '"<b>7</b>"' in fixed and "These inputs are fixed" in fixed
 
 
-def test_the_prompt_forbids_running_code_and_names_every_danger_kind():
+def test_the_prompt_forbids_running_code_defines_danger_as_malicious_and_names_effect_kinds():
     prompt = walk.WALK_SYSTEM_PROMPT
     assert "NEVER run, or try to run, any code" in prompt
-    for kind in walk.DANGER_KINDS:
+    assert "meant to cause harm" in prompt
+    assert "Risky isn't malicious" in prompt
+    for kind in walk.EFFECT_KINDS:
         assert f'"{kind}"' in prompt
     assert "even when these inputs don't reach it" in prompt
 

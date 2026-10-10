@@ -20,8 +20,9 @@ MAX_NOTE = 200
 MAX_ASSUMED = 5
 MAX_ASSUMPTION = 120
 MAX_DANGER = 5
+MAX_EFFECTS = 5
 MAX_MESSAGE = 300
-DANGER_KINDS = ("destructive", "external", "unsafe", "irreversible")
+EFFECT_KINDS = ("external", "destructive", "unsafe", "irreversible")
 OUTCOMES = ("exit", "error", "stopped")
 
 WALK_SYSTEM_PROMPT = f"""\
@@ -54,7 +55,8 @@ Step = {{
   "output": {{"name": "value"}},       // the values coming out; on an error, {{"raises": "KeyError('x')"}}
   "note": "What happened and why",   // at most {MAX_NOTE} characters
   "assumed": ["Visit 7 exists"],     // optional: every value you made up
-  "danger": [{{"kind": "destructive", "note": "..."}}]  // optional: see below
+  "danger": [{{"note": "..."}}],       // optional: only code that looks malicious, see below
+  "effects": [{{"kind": "external", "note": "..."}}]  // optional: see below
 }}
 
 Rules:
@@ -66,20 +68,31 @@ Rules:
 - Where the code would raise, make that the last step, with the error as its output, and
   use an "error" outcome. An "exit" outcome must end on a block of kind exit.
 
-Dangerous code: on every step, flag each operation in its code that would be dangerous
-to run for real, even when these inputs don't reach it, and even when it looks intended.
-The reviewer decides whether it's acceptable. Kinds:
+Danger means malicious. On every step, flag under "danger" any code that
+appears meant to cause harm, even when these inputs don't reach it. For example:
+- sending secrets, credentials or user data somewhere they shouldn't go;
+- a backdoor, a hidden account, or a check that quietly bypasses authentication or permissions;
+- fetching and running remote code, or code obfuscated to hide what it does;
+- deliberate sabotage, such as corrupting or wiping data on a trigger or a date;
+- crypto-mining or other abuse of the host's resources.
+Each flag's note says what the code does, why it looks meant to cause harm, and where, e.g.
+"Posts os.environ to https://paste.example/api on every login (app/auth.py:88)". You don't
+need to be certain: when you suspect malice, flag it and say why; the reviewer decides.
+At most {MAX_DANGER} per step.
+
+Risky isn't malicious. Legitimate operations that happen to be risky never go under "danger".
+Tag them under "effects" instead, also when these inputs don't reach them. Kinds:
+- "external": effects outside the system (email, SMS, push, payments, webhooks, third-party
+  API calls, publishing messages);
 - "destructive": deletes or overwrites data (DELETE/DROP/TRUNCATE, bulk updates, removing
-  files, clearing caches or queues others rely on);
-- "external": effects outside the system (email, SMS, push, payments, webhooks, state-changing
-  third-party API calls, publishing messages);
-- "unsafe": security risks (shell or eval/exec built from input, SQL built by string
-  formatting, deserialising untrusted data, paths built from input without checks, missing
-  permission checks, secrets in logs or responses);
+  files, clearing caches or queues);
+- "unsafe": an apparent accident that's a security risk (SQL built by string formatting,
+  shell or eval built from input, deserialising untrusted data, paths from input without
+  checks, a missing permission check);
 - "irreversible": can't be undone some other way (schema or data migrations, revoking
   access, rotating or deleting keys).
-Each flag's note says what the code does and where, e.g. "Calls Visit.objects.filter(owner=user).delete()
-without a status filter (app/visits/services.py:142)". At most {MAX_DANGER} per step.
+Each effect's note says what the code does and where, e.g. "Posts the visit to the sync
+webhook (app/sync.py:40)". At most {MAX_EFFECTS} per step.
 
 The pull request is included at the start of the conversation."""
 
@@ -253,25 +266,31 @@ def _step(s, at: str, leaves: dict[str, dict], problems: list[str]) -> dict:
             problems.append(f"{at}.assumed: each must be 1 to {MAX_ASSUMPTION} characters")
         elif assumed:
             out["assumed"] = assumed
-    if "danger" in s:
-        flags = s["danger"]
-        if not isinstance(flags, list) or len(flags) > MAX_DANGER:
-            problems.append(f"{at}.danger: at most {MAX_DANGER}")
-        else:
-            kept = []
-            for j, flag in enumerate(flags):
-                where = f"{at}.danger[{j}]"
-                if not isinstance(flag, dict):
-                    problems.append(f"{where}: must be an object")
-                    continue
-                if flag.get("kind") not in DANGER_KINDS:
-                    problems.append(f"{where}.kind: must be one of {', '.join(DANGER_KINDS)}")
-                if not _text(flag.get("note"), MAX_NOTE):
-                    problems.append(f"{where}.note: must be 1 to {MAX_NOTE} characters")
-                kept.append({"kind": flag.get("kind"), "note": flag.get("note")})
-            if kept:
-                out["danger"] = kept
+    _flags(s, "danger", at, MAX_DANGER, False, out, problems)
+    _flags(s, "effects", at, MAX_EFFECTS, True, out, problems)
     return out
+
+
+def _flags(s: dict, key: str, at: str, limit: int, kinded: bool, out: dict, problems: list[str]) -> None:
+    if key not in s:
+        return
+    items = s[key]
+    if not isinstance(items, list) or len(items) > limit:
+        problems.append(f"{at}.{key}: at most {limit}")
+        return
+    kept = []
+    for j, item in enumerate(items):
+        where = f"{at}.{key}[{j}]"
+        if not isinstance(item, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        if kinded and item.get("kind") not in EFFECT_KINDS:
+            problems.append(f"{where}.kind: must be one of {', '.join(EFFECT_KINDS)}")
+        if not _text(item.get("note"), MAX_NOTE):
+            problems.append(f"{where}.note: must be 1 to {MAX_NOTE} characters")
+        kept.append({"kind": item.get("kind"), "note": item.get("note")} if kinded else {"note": item.get("note")})
+    if kept:
+        out[key] = kept
 
 
 def _outcome(value, problems: list[str]) -> dict | None:

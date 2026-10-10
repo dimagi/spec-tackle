@@ -117,20 +117,30 @@ test("walk through the map, see danger, edit inputs and hit the cache", async ({
   // Stepping forward takes an edge, drawn on the map.
   await page.keyboard.press("ArrowRight");
   await expect(panel.getByText("Step 2 of 3")).toBeVisible();
-  await expect(chart.locator(".react-flow__edge.walk-taken").first()).toBeVisible();
+  // Not toBeVisible: a straight vertical edge has a zero-width bounding box, which Playwright calls hidden.
+  const taken = chart.locator(".react-flow__edge.walk-taken");
+  await expect(taken).toHaveCount(1);
+  await expect(taken.locator(".react-flow__edge-path")).toHaveCSS("stroke", "rgb(37, 99, 235)");
   await page.keyboard.press("ArrowLeft");
   await expect(panel.getByText("Step 1 of 3")).toBeVisible();
 
-  // Danger is visible before it's reached, and the banner jumps to it.
-  await expect(chart.getByRole("button", { name: /^Give up/ })).toHaveAccessibleName(/flagged as dangerous: Destructive/);
-  await panel.getByRole("alert").getByRole("button", { name: /Give up · Destructive/ }).click();
+  // Malicious code is flagged before it's reached, and the banner jumps to it.
+  await expect(chart.getByRole("button", { name: /^Give up/ })).toHaveAccessibleName(/looks malicious/);
+  await panel.getByRole("alert").getByRole("button", { name: /Give up/ }).click();
   await expect(panel.getByText("Step 3 of 3")).toBeVisible();
-  await expect(panel.getByText("Deletes the queued form (app/retry.py:2)")).toBeVisible();
+  await expect(panel.getByText("Posts the queued form to an unknown host before deleting it (app/retry.py:2)")).toBeVisible();
   await expect(panel.getByText("Reached exit: Give up")).toBeVisible();
 
   await page.keyboard.press("ArrowLeft");
   await expect(panel.getByText("Step 2 of 3")).toBeVisible();
   await expect(panel.getByText("assumed: The server stays down")).toBeVisible();
+
+  // Effects are neutral: a summary and a card label, nothing red.
+  await expect(panel.getByText(/^Effects:/)).toContainText("1 external call");
+  await expect(panel.getByText("External call · Resends the form to the server (app/retry.py:1)")).toBeVisible();
+  const backoff = chart.getByRole("button", { name: /^Back off/ });
+  await expect(backoff).toHaveAccessibleName(/effects: External call/);
+  await expect(backoff).not.toHaveAccessibleName(/looks malicious/);
 
   // A reload comes back to the same walkthrough.
   await page.reload();

@@ -1,5 +1,5 @@
 import type { LogicBlock, WalkStep } from "../api/types";
-import { changedKeys, containing, dangerSteps, edgeWalkClass, entries, pathBlocks, stepForBlock, takenEdges, walkMarks } from "./walkthrough";
+import { changedKeys, containing, dangerSteps, edgeWalkClass, effectSteps, entries, pathBlocks, stepForBlock, takenEdges, walkMarks } from "./walkthrough";
 
 const b = (id: string, over: Partial<LogicBlock> = {}): LogicBlock => ({ id, label: id, kind: "step", change: "added", next: [], ...over });
 // send -> retry[ job(entry) -> backoff ] -> give-up ; retry also -> alt
@@ -13,7 +13,7 @@ const BLOCKS: LogicBlock[] = [
   b("alt"),
 ];
 const s = (blockId: string, over: Partial<WalkStep> = {}): WalkStep => ({ blockId, input: {}, output: {}, note: "n", ...over });
-const STEPS = [s("send"), s("job"), s("backoff"), s("backoff"), s("give-up", { danger: [{ kind: "destructive", note: "d" }] })];
+const STEPS = [s("send"), s("job"), s("backoff"), s("backoff"), s("give-up", { danger: [{ note: "d" }], effects: [{ kind: "destructive", note: "x" }, { kind: "external", note: "y" }] })];
 
 test("entries are listed top level first", () => {
   expect(entries(BLOCKS).map((e) => e.id)).toEqual(["send", "job"]);
@@ -54,14 +54,28 @@ test("a block's step is its latest visit up to the furthest step reached", () =>
 });
 
 test("danger steps", () => {
-  expect(dangerSteps(STEPS)).toEqual([{ index: 4, kinds: ["destructive"] }]);
+  expect(dangerSteps(STEPS)).toEqual([4]);
+  expect(dangerSteps(STEPS.slice(0, 4))).toEqual([]);
+});
+
+test("effect steps are grouped by kind in kind order, each step once", () => {
+  const steps = [
+    s("send", { effects: [{ kind: "destructive", note: "a" }, { kind: "destructive", note: "b" }] }),
+    s("job"),
+    s("backoff", { effects: [{ kind: "external", note: "c" }, { kind: "destructive", note: "d" }] }),
+  ];
+  expect(effectSteps(steps)).toEqual([
+    { kind: "external", steps: [2] },
+    { kind: "destructive", steps: [0, 2] },
+  ]);
+  expect(effectSteps([s("send")])).toEqual([]);
 });
 
 test("walk marks", () => {
   const marks = walkMarks(BLOCKS, STEPS, 3);
-  expect(marks.get("backoff")).toEqual({ current: true, visited: true, step: 4, dim: false, danger: [] });
+  expect(marks.get("backoff")).toEqual({ current: true, visited: true, step: 4, dim: false, danger: false, effects: [] });
   expect(marks.get("send")).toMatchObject({ current: false, visited: true, step: 1 });
-  expect(marks.get("give-up")).toEqual({ current: false, visited: false, step: null, dim: false, danger: ["destructive"] });
+  expect(marks.get("give-up")).toEqual({ current: false, visited: false, step: null, dim: false, danger: true, effects: ["external", "destructive"] });
   expect(marks.get("alt")).toMatchObject({ dim: true, visited: false });
   expect(marks.get("retry")).toMatchObject({ dim: false, visited: false });
 });

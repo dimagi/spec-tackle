@@ -62,9 +62,10 @@ const TRACE: Trace = {
   inputs: [{ name: "form", description: "The form", value: { id: 7 } }],
   steps: [
     { blockId: "start", input: { form: { id: 7 } }, output: { ok: true }, note: "Accepts the form." },
-    { blockId: "store", input: { id: 7 }, output: { saved: true }, note: "Stores it." },
+    { blockId: "store", input: { id: 7 }, output: { saved: true }, note: "Stores it.",
+      danger: [{ note: "Sends the visit to an unknown host (app/visits.py:3)" }] },
     { blockId: "sync", input: { id: 7 }, output: { queued: true }, note: "Queues it.",
-      danger: [{ kind: "external", note: "Posts to the sync webhook" }] },
+      effects: [{ kind: "external", note: "Posts to the sync webhook" }] },
   ],
   outcome: { kind: "stopped", message: "The sync job runs elsewhere" },
 };
@@ -338,9 +339,14 @@ test("the Walkthrough button opens the panel on the first entry and expands the 
   // ...without touching the reviewer's saved choice.
   expect(loadPref(PR, "logicExpanded", [])).toEqual([]);
   expect((await node(/^Form is submitted/)).className).toMatch(/walk-current/);
-  // The panel's danger list has a "Queue a sync" button too; the chart's is the one outside it.
+  // The panel's lists have buttons for the same steps; the chart's is the one outside it.
   const queued = (await screen.findAllByRole("button", { name: /^Queue a sync/ })).find((b) => !b.closest("aside"));
-  expect(queued).toHaveAccessibleName(/flagged as dangerous: External effect/);
+  expect(queued).toHaveAccessibleName(/effects: External call/);
+  expect(queued).not.toHaveAccessibleName(/looks malicious/);
+  expect(queued!.querySelector(".walk-effects")).not.toBeNull();
+  const stored = (await screen.findAllByRole("button", { name: /^Store the visit/ })).find((b) => !b.closest("aside"));
+  expect(stored).toHaveAccessibleName(/looks malicious/);
+  expect(stored!.querySelector(".walk-danger")).not.toBeNull();
 
   await userEvent.keyboard("{Escape}");
   expect(screen.queryByRole("complementary", { name: "Walkthrough" })).toBeNull();
@@ -354,7 +360,8 @@ test("clicking a visited block jumps to its step; others open their code", async
   await within(panel).findByText("Step 1 of 3");
   await userEvent.click(within(panel).getByRole("button", { name: /Next/ }));
   await userEvent.click(within(panel).getByRole("button", { name: /Next/ }));
-  await userEvent.click(await node(/^Store the visit/));
+  const chartNode = (await screen.findAllByRole("button", { name: /^Store the visit/ })).find((b) => !b.closest("aside"))!;
+  await userEvent.click(chartNode);
   expect(within(panel).getByText("Step 2 of 3")).toBeInTheDocument();
 });
 

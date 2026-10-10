@@ -5,9 +5,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { DangerKind, LogicBlock, LogicKind } from "../../api/types";
+import type { LogicBlock, LogicKind } from "../../api/types";
 import { layoutFlow, type FlowNode } from "../../lib/logicFlow";
-import { DANGER_LABEL, edgeWalkClass, type Walk, type WalkMark } from "../../lib/walkthrough";
+import { EFFECT_LABEL, edgeWalkClass, type Walk, type WalkMark } from "../../lib/walkthrough";
 
 type Props = {
   blocks: LogicBlock[];
@@ -34,8 +34,9 @@ const countFunctions = (b: LogicBlock): number =>
   (b.functions?.length ?? 0) + (b.children ?? []).reduce((n, c) => n + countFunctions(c), 0);
 
 /** What a screen reader hears, and what a hover shows. */
-export function blockLabel(b: LogicBlock, expanded: boolean, danger: DangerKind[] = []): string {
-  const flagged = danger.length ? `; flagged as dangerous: ${danger.map((k) => DANGER_LABEL[k]).join(", ")}` : "";
+export function blockLabel(b: LogicBlock, expanded: boolean, mark?: WalkMark): string {
+  const flagged = (mark?.danger ? "; looks malicious" : "")
+    + (mark?.effects.length ? `; effects: ${mark.effects.map((k) => EFFECT_LABEL[k]).join(", ")}` : "");
   if (expanded) return `⊖ ${b.label}: show its code; Ctrl-click to collapse${flagged}`;
   const more = !!b.children?.length;
   return `${b.label}${more ? " ⊕" : ""}: ${b.kind}, show its code${more ? "; Ctrl-click to expand" : ""}${flagged}`;
@@ -77,7 +78,12 @@ function WalkBadges({ mark }: { mark: WalkMark | undefined }) {
   return (
     <>
       {mark.step !== null && <span className="walk-step" aria-hidden="true">{mark.step}</span>}
-      {mark.danger.length > 0 && <span className="walk-danger" aria-hidden="true">⚠</span>}
+      {(mark.danger || mark.effects.length > 0) && (
+        <span className="walk-flags" aria-hidden="true">
+          {mark.danger && <span className="walk-danger">⚠</span>}
+          {mark.effects.length > 0 && <span className="walk-effects">ⓘ</span>}
+        </span>
+      )}
     </>
   );
 }
@@ -98,7 +104,7 @@ function Card({ data }: NodeProps<FlowNode>) {
   const mark = walk?.marks.get(b.id);
   const steps = countSteps(b);
   const fns = countFunctions(b);
-  const label = blockLabel(b, false, mark?.danger);
+  const label = blockLabel(b, false, mark);
   return (
     <div {...props} aria-label={label} title={label}
       className={`logic-card nopan h-full rounded-xl border-2 px-3 py-2 shadow-sm ${TONE[b.change]} ${b.kind === "exit" ? "!border-rose-500" : ""} ${selected ? "is-selected" : ""} ${walkClass(mark)}`}>
@@ -121,7 +127,7 @@ function Box({ data }: NodeProps<FlowNode>) {
   const { selected, props } = useActivate(b);
   const { walk } = useContext(FlowCtx);
   const mark = walk?.marks.get(b.id);
-  const label = blockLabel(b, true, mark?.danger);
+  const label = blockLabel(b, true, mark);
   return (
     <div {...props} aria-label={label} title={label}
       className={`logic-box nopan h-full w-full rounded-2xl border-2 border-dashed ${TONE[b.change]} ${selected ? "is-selected" : ""} ${walkClass(mark)}`}>

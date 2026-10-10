@@ -22,9 +22,10 @@ INPUTS = [{"name": "form", "description": "The submitted form", "value": {"id": 
 STEPS = [
     {"blockId": "send", "input": {"form": {"id": 7}}, "output": {"sent": False}, "note": "The first send fails."},
     {"blockId": "backoff", "input": {"tries": 1}, "output": {"tries": 5}, "note": "Retries five times.",
-     "assumed": ["The server stays down"]},
+     "assumed": ["The server stays down"],
+     "effects": [{"kind": "external", "note": "Resends the form to the server (app/retry.py:1)"}]},
     {"blockId": "give-up", "input": {"tries": 5}, "output": {"status": "failed"}, "note": "Gives up.",
-     "danger": [{"kind": "destructive", "note": "Deletes the queued form (app/retry.py:9)"}]},
+     "danger": [{"note": "Posts the queued form to an unknown host before deleting it (app/retry.py:9)"}]},
 ]
 OUTCOME = {"kind": "exit", "message": "Reached exit: Give up"}
 PROPOSED = f"```json\n{json.dumps({'inputs': INPUTS, 'steps': STEPS, 'outcome': OUTCOME})}\n```"
@@ -111,7 +112,8 @@ def test_a_proposing_run_stores_the_starting_trace(walk):
     assert state["starting"] == INPUTS and state["error"] is None
     trace = state["trace"]
     assert trace["proposed"] is True and trace["entryId"] == "send" and trace["mapId"] == walk.map_id
-    assert trace["steps"][2]["danger"][0]["kind"] == "destructive"
+    assert trace["steps"][2]["danger"] == [{"note": "Posts the queued form to an unknown host before deleting it (app/retry.py:9)"}]
+    assert trace["steps"][1]["effects"][0]["kind"] == "external"
     assert walk.get(f"/api/logic/traces/{trace['id']}").json() == trace
 
     [call] = walk.fake_ask.calls

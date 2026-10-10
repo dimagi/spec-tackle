@@ -492,9 +492,12 @@ html.dark .claude-error { color: #fca5a5; }
 .logic-flow .walk-visited { box-shadow: 0 0 0 3px rgba(37, 99, 235, .35); }
 .logic-flow .walk-dim { opacity: .3; }
 .logic-flow .react-flow__edge.walk-dim { opacity: .25; }
-.walk-step, .walk-danger { position: absolute; top: -10px; display: flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
-.walk-step { left: -10px; background: #2563eb; }
-.walk-danger { right: -10px; background: #dc2626; }
+.walk-step, .walk-danger, .walk-effects { display: flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
+.walk-step { position: absolute; top: -10px; left: -10px; background: #2563eb; }
+.walk-flags { position: absolute; top: -10px; right: -10px; display: flex; gap: 3px; }
+.walk-danger { background: #dc2626; }
+.walk-effects { background: #78716c; }
+:root.dark .walk-effects { background: #a8a29e; color: #1c1917; }
 .walk-json { margin: 0; overflow-x: auto; border-radius: .5rem; border: 1px solid var(--paper-border); background: var(--code-bg); font-size: 12px; line-height: 1.5; padding: .25rem 0; }
 .walk-json > div { white-space: pre; padding: 0 .75rem; }
 .walk-json > div.changed { background: rgba(16, 185, 129, .12); box-shadow: inset 3px 0 0 #10b981; }

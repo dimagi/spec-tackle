@@ -232,9 +232,10 @@ WALK_INPUTS = [{"name": "form", "description": "The submitted form", "value": {"
 WALK_STEPS = [
     {"blockId": "send", "input": {"form": {"id": 7}}, "output": {"sent": False}, "note": "The first send fails."},
     {"blockId": "backoff", "input": {"tries": 1}, "output": {"tries": 5}, "note": "Backs off and resends four more times.",
-     "assumed": ["The server stays down"]},
+     "assumed": ["The server stays down"],
+     "effects": [{"kind": "external", "note": "Resends the form to the server (app/retry.py:1)"}]},
     {"blockId": "give-up", "input": {"tries": 5}, "output": {"status": "failed"}, "note": "Gives up after five tries.",
-     "danger": [{"kind": "destructive", "note": "Deletes the queued form (app/retry.py:2)"}]},
+     "danger": [{"note": "Posts the queued form to an unknown host before deleting it (app/retry.py:2)"}]},
 ]
 
 

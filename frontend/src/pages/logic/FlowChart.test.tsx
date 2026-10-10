@@ -11,7 +11,8 @@ const BLOCKS: LogicBlock[] = [
 ];
 const STEPS = [
   { blockId: "send", input: {}, output: {}, note: "n" },
-  { blockId: "drop", input: {}, output: {}, note: "n", danger: [{ kind: "destructive" as const, note: "Deletes it" }] },
+  { blockId: "drop", input: {}, output: {}, note: "n", danger: [{ note: "Sends secrets out" }] },
+  { blockId: "alt", input: {}, output: {}, note: "n", effects: [{ kind: "external" as const, note: "Calls out" }, { kind: "destructive" as const, note: "Deletes it" }] },
 ];
 
 beforeEach(() => stubReactFlowEnvironment());
@@ -28,14 +29,19 @@ test("walk marks ring the current step, number visited ones, flag danger and dim
   const drop = screen.getByRole("button", { name: /^Drop the queue/ });
   expect(drop).not.toHaveClass("walk-visited");
   expect(drop.querySelector(".walk-danger")).toHaveTextContent("⚠");
-  expect(drop).toHaveAccessibleName(/flagged as dangerous: Destructive/);
+  expect(drop).toHaveAccessibleName(/looks malicious/);
+  expect(drop.querySelector(".walk-effects")).toBeNull();
 
-  expect(screen.getByRole("button", { name: /^Another path/ })).toHaveClass("walk-dim");
+  const alt = screen.getByRole("button", { name: /^Another path/ });
+  expect(alt.querySelector(".walk-effects")).toHaveTextContent("ⓘ");
+  expect(alt.querySelector(".walk-danger")).toBeNull();
+  expect(alt).toHaveAccessibleName(/effects: External call, Deletes data/);
+  expect(alt).not.toHaveAccessibleName(/looks malicious/);
 });
 
 test("without a walk nothing is marked", async () => {
   render(<FlowChart blocks={BLOCKS} expanded={new Set()} selected={null} onActivate={vi.fn()} onFailed={vi.fn()} />);
   const send = await screen.findByRole("button", { name: /^Form is sent/ });
   expect(send.className).not.toMatch(/walk-/);
-  expect(document.querySelector(".walk-step, .walk-danger")).toBeNull();
+  expect(document.querySelector(".walk-step, .walk-danger, .walk-effects")).toBeNull();
 });

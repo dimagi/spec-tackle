@@ -164,9 +164,12 @@ export type DocRefsState = { available: boolean; refs: DocRefs | null; stale: bo
 
 /** The Logic walkthrough: one traced run from an entry block (docs/specs/2026-10-10-logic-walkthrough-design.md). */
 export type WalkInput = { name: string; description: string; value: unknown };
-export type DangerKind = "destructive" | "external" | "unsafe" | "irreversible";
-export type Danger = { kind: DangerKind; note: string };
-export type WalkStep = { blockId: string; input: unknown; output: unknown; note: string; assumed?: string[]; danger?: Danger[] };
+/** Code that looks meant to cause harm. */
+export type Danger = { note: string };
+export type EffectKind = "external" | "destructive" | "unsafe" | "irreversible";
+/** A notable but legitimate operation: neutral, not a warning. */
+export type Effect = { kind: EffectKind; note: string };
+export type WalkStep = { blockId: string; input: unknown; output: unknown; note: string; assumed?: string[]; danger?: Danger[]; effects?: Effect[] };
 export type WalkOutcome = { kind: "exit" | "error" | "stopped"; message: string };
 export type Trace = {
   id: string; mapId: string; entryId: string; inputs: WalkInput[]; steps: WalkStep[];

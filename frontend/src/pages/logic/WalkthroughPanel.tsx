@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { LogicBlock, Trace, WalkInput, WalkStep } from "../../api/types";
-import { changedKeys, DANGER_LABEL, dangerSteps, type Highlight } from "../../lib/walkthrough";
+import type { EffectKind, LogicBlock, Trace, WalkInput, WalkStep } from "../../api/types";
+import { changedKeys, dangerSteps, EFFECT_LABEL, effectSteps, type Highlight } from "../../lib/walkthrough";
 import type { WalkRun } from "./useWalk";
 
 type Props = {
@@ -41,6 +41,8 @@ export function WalkthroughPanel({ entries, entry, onEntry, blocks, walk, step, 
   }, [trace, step, last, onStep, active]);
 
   const flagged = trace ? dangerSteps(trace.steps) : [];
+  const effects = trace ? effectSteps(trace.steps) : [];
+  const labelOf = (i: number) => blocks.get(trace!.steps[i].blockId)?.label ?? trace!.steps[i].blockId;
   const current = trace?.steps[step];
 
   return (
@@ -61,18 +63,17 @@ export function WalkthroughPanel({ entries, entry, onEntry, blocks, walk, step, 
         </label>
         {flagged.length > 0 && (
           <div role="alert" className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200">
-            <p className="font-semibold">⚠ {flagged.length} step{flagged.length === 1 ? "" : "s"} flagged as dangerous</p>
+            <p className="font-semibold">⚠ {flagged.length} {flagged.length === 1 ? "step looks" : "steps look"} malicious</p>
             <ul className="mt-1 space-y-0.5">
-              {flagged.map((f) => (
-                <li key={f.index}>
-                  <button type="button" className="text-left hover:underline" onClick={() => onStep(f.index)}>
-                    {blocks.get(trace!.steps[f.index].blockId)?.label ?? trace!.steps[f.index].blockId} · {f.kinds.map((k) => DANGER_LABEL[k]).join(", ")}
-                  </button>
+              {flagged.map((i) => (
+                <li key={i}>
+                  <button type="button" className="text-left hover:underline" onClick={() => onStep(i)}>{labelOf(i)}</button>
                 </li>
               ))}
             </ul>
           </div>
         )}
+        {effects.length > 0 && <EffectsSummary groups={effects} label={labelOf} onStep={onStep} />}
       </div>
 
       {!data && !walk.loadError && <p className="p-4 text-sm text-stone-500">Loading…</p>}
@@ -111,6 +112,44 @@ export function WalkthroughPanel({ entries, entry, onEntry, blocks, walk, step, 
         </>
       )}
     </aside>
+  );
+}
+
+const EFFECT_PHRASE: Record<EffectKind, (n: number) => string> = {
+  external: (n) => `${n} external call${n === 1 ? "" : "s"}`,
+  destructive: (n) => `${n} deletes data`,
+  unsafe: (n) => `${n} security risk${n === 1 ? "" : "s"}`,
+  irreversible: (n) => `${n} irreversible`,
+};
+
+/** A neutral line of effect counts; each phrase opens the steps that have it. */
+function EffectsSummary({ groups, label, onStep }: {
+  groups: { kind: EffectKind; steps: number[] }[]; label: (i: number) => string; onStep: (i: number) => void;
+}) {
+  const [open, setOpen] = useState<EffectKind | null>(null);
+  const shown = groups.find((g) => g.kind === open);
+  return (
+    <div className="walk-effects-summary text-xs text-stone-600 dark:text-stone-400">
+      <p>
+        Effects:{" "}
+        {groups.map((g, i) => (
+          <span key={g.kind}>
+            {i > 0 && " · "}
+            <button type="button" aria-expanded={open === g.kind} className="underline decoration-dotted hover:text-stone-900 dark:hover:text-stone-100"
+              onClick={() => setOpen(open === g.kind ? null : g.kind)}>
+              {EFFECT_PHRASE[g.kind](g.steps.length)}
+            </button>
+          </span>
+        ))}
+      </p>
+      {shown && (
+        <ul className="mt-1 space-y-0.5 pl-3">
+          {shown.steps.map((i) => (
+            <li key={i}><button type="button" className="text-left hover:underline" onClick={() => onStep(i)}>{label(i)}</button></li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -182,9 +221,18 @@ function StepCard({ step, block, trace, isLast, onShowCode }: {
       <p className="text-sm">{step.note}</p>
       {step.danger?.map((d, i) => (
         <div key={i} className="walk-flag rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200">
-          <span className="font-semibold">⚠ {DANGER_LABEL[d.kind]}</span> <span>{d.note}</span>
+          <span className="font-semibold">⚠ Looks malicious</span> <span>{d.note}</span>
         </div>
       ))}
+      {step.effects?.length ? (
+        <div className="flex flex-wrap gap-1">
+          {step.effects.map((e, i) => (
+            <span key={i} className="walk-effect rounded-lg border border-stone-300 bg-stone-100 px-2 py-0.5 text-xs text-stone-800 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200">
+              {EFFECT_LABEL[e.kind]} · {e.note}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {step.assumed?.length ? (
         <div className="flex flex-wrap gap-1">
           {step.assumed.map((a, i) => (

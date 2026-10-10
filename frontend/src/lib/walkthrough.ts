@@ -1,9 +1,10 @@
 /** The Logic walkthrough's path through the map: what to expand, ring, dim and highlight. Pure; no React. */
-import type { DangerKind, LogicBlock, WalkStep } from "../api/types";
+import type { EffectKind, LogicBlock, WalkStep } from "../api/types";
 import { edgeId } from "./logicFlow";
 
-export const DANGER_LABEL: Record<DangerKind, string> = {
-  destructive: "Destructive", external: "External effect", unsafe: "Unsafe", irreversible: "Irreversible",
+export const EFFECT_KINDS: EffectKind[] = ["external", "destructive", "unsafe", "irreversible"];
+export const EFFECT_LABEL: Record<EffectKind, string> = {
+  external: "External call", destructive: "Deletes data", unsafe: "Security risk", irreversible: "Irreversible",
 };
 
 /** Every entry block, top level first, then each deeper level. */
@@ -100,12 +101,20 @@ export function stepForBlock(steps: WalkStep[], blockId: string, reached: number
   return null;
 }
 
-export function dangerSteps(steps: WalkStep[]): { index: number; kinds: DangerKind[] }[] {
-  return steps.flatMap((s, index) =>
-    s.danger?.length ? [{ index, kinds: [...new Set(s.danger.map((d) => d.kind))] }] : []);
+/** Indices of the steps whose code looks malicious. */
+export function dangerSteps(steps: WalkStep[]): number[] {
+  return steps.flatMap((s, i) => (s.danger?.length ? [i] : []));
 }
 
-export type WalkMark = { current: boolean; visited: boolean; step: number | null; dim: boolean; danger: DangerKind[] };
+/** One group per effect kind present, in kind order, with the indices of the steps that have it. */
+export function effectSteps(steps: WalkStep[]): { kind: EffectKind; steps: number[] }[] {
+  return EFFECT_KINDS.flatMap((kind) => {
+    const at = steps.flatMap((s, i) => (s.effects?.some((e) => e.kind === kind) ? [i] : []));
+    return at.length ? [{ kind, steps: at }] : [];
+  });
+}
+
+export type WalkMark = { current: boolean; visited: boolean; step: number | null; dim: boolean; danger: boolean; effects: EffectKind[] };
 
 /** What the chart needs to draw a walkthrough: per-block marks, edges walked so far, and the whole path's edges (`path` holds edge ids). */
 export type Walk = { marks: Map<string, WalkMark>; taken: Set<string>; path: Set<string> };
@@ -117,13 +126,15 @@ export function walkMarks(blocks: LogicBlock[], steps: WalkStep[], current: numb
   const marks = new Map<string, WalkMark>();
   for (const id of byId.keys()) {
     const step = stepForBlock(steps, id, current);
-    const danger = [...new Set(steps.filter((s) => s.blockId === id).flatMap((s) => (s.danger ?? []).map((d) => d.kind)))];
+    const here = steps.filter((s) => s.blockId === id);
+    const kinds = new Set(here.flatMap((s) => (s.effects ?? []).map((e) => e.kind)));
     marks.set(id, {
       current: steps[current]?.blockId === id,
       visited: step !== null,
       step: step === null ? null : step + 1,
       dim: !path.has(id),
-      danger,
+      danger: here.some((s) => !!s.danger?.length),
+      effects: EFFECT_KINDS.filter((k) => kinds.has(k)),
     });
   }
   return marks;

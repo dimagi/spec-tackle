@@ -17,9 +17,11 @@ const TRACE: Trace = {
   id: "t1", mapId: "m1", entryId: "send", inputs: STARTING, proposed: true, usedAt: "",
   steps: [
     { blockId: "send", input: { body: { status: "final" } }, output: { payload: "<img src=x onerror=alert(1)>" }, note: "Parses <b>the</b> body." },
-    { blockId: "save", input: { visit: 7 }, output: { visit: 7, saved: true }, note: "Saves it.", assumed: ["Visit 7 exists"] },
+    { blockId: "save", input: { visit: 7 }, output: { visit: 7, saved: true }, note: "Saves it.", assumed: ["Visit 7 exists"],
+      effects: [{ kind: "external", note: "Posts the visit to the sync webhook (app/q.py:2)" }] },
     { blockId: "drop", input: {}, output: { raises: "KeyError('q')" }, note: "Clears it.",
-      danger: [{ kind: "destructive", note: "Deletes every queued form (app/q.py:9)" }] },
+      danger: [{ note: "Posts every queued form to an unknown host (app/q.py:9)" }],
+      effects: [{ kind: "destructive", note: "Deletes every queued form (app/q.py:9)" }, { kind: "external", note: "Calls out (app/q.py:8)" }] },
   ],
   outcome: { kind: "error", message: "Raised KeyError: 'q'" },
 };
@@ -138,11 +140,46 @@ test("step card: note, assumptions, changed keys, values as text, outcome", asyn
 test("danger: flag on the step card and a banner on every step that jumps to it", async () => {
   render(<Harness walk={walkRun()} />);
   const banner = screen.getByRole("alert");
-  expect(banner).toHaveTextContent("⚠ 1 step flagged as dangerous");
-  await userEvent.click(within(banner).getByRole("button", { name: /Drop the queue · Destructive/ }));
+  expect(banner).toHaveTextContent("⚠ 1 step looks malicious");
+  await userEvent.click(within(banner).getByRole("button", { name: "Drop the queue" }));
   expect(screen.getByText("Step 3 of 3")).toBeInTheDocument();
-  const flag = screen.getByText("Deletes every queued form (app/q.py:9)").closest(".walk-flag")!;
-  expect(flag).toHaveTextContent("Destructive");
+  const flag = screen.getByText("Posts every queued form to an unknown host (app/q.py:9)").closest(".walk-flag")!;
+  expect(flag).toHaveTextContent("⚠ Looks malicious");
+});
+
+test("danger banner counts several steps", () => {
+  const steps = TRACE.steps.map((s) => ({ ...s, danger: [{ note: "x" }] }));
+  render(<Harness walk={walkRun({}, { trace: { ...TRACE, steps } })} />);
+  expect(screen.getByRole("alert")).toHaveTextContent("⚠ 3 steps look malicious");
+});
+
+test("effects: a neutral summary, phrases that open step lists, and chips on the card", async () => {
+  render(<Harness walk={walkRun()} />);
+  const summary = screen.getByText(/^Effects:/);
+  expect(summary).toHaveTextContent("Effects: 2 external calls · 1 deletes data");
+  expect(summary.closest("[role=alert]")).toBeNull();
+  await userEvent.click(within(summary).getByRole("button", { name: "1 deletes data" }));
+  await userEvent.click(within(summary.parentElement!).getByRole("button", { name: "Drop the queue" }));
+  expect(screen.getByText("Step 3 of 3")).toBeInTheDocument();
+  const chip = screen.getByText(/Deletes every queued form/).closest(".walk-effect")!;
+  expect(chip).toHaveTextContent("Deletes data · Deletes every queued form (app/q.py:9)");
+  expect(screen.getByText(/Calls out/).closest(".walk-effect")).toHaveTextContent("External call");
+});
+
+test("a step with only effects shows nothing red", async () => {
+  const steps = TRACE.steps.map(({ danger: _d, ...s }) => s);
+  render(<Harness walk={walkRun({}, { trace: { ...TRACE, steps } })} />);
+  expect(screen.queryByRole("alert")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "2 external calls" }));
+  await userEvent.click(within(screen.getByText(/^Effects:/).parentElement!).getAllByRole("button", { name: "Save the visit" })[0]);
+  expect(screen.getByText(/Posts the visit to the sync webhook/).closest(".walk-effect")).not.toBeNull();
+  expect(document.querySelector(".walk-flag")).toBeNull();
+});
+
+test("no effects summary when there are none", () => {
+  const steps = TRACE.steps.map(({ effects: _e, ...s }) => s);
+  render(<Harness walk={walkRun({}, { trace: { ...TRACE, steps } })} />);
+  expect(screen.queryByText(/^Effects:/)).toBeNull();
 });
 
 test("no banner when nothing is flagged", () => {
