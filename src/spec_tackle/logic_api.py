@@ -45,26 +45,47 @@ def _state(*, state, login: str, pr: PRRef, head: str) -> dict:
 # -- the run -----------------------------------------------------------------
 
 
-async def _ask(*, state, cwd, snapshot: str, question: str, full_prompt: str, session_id, emit):
-    """One Claude turn for the map; progress goes to `emit`, the answer comes back."""
-    writing = False
+async def ask_json(
+    *, state, cwd, snapshot: str, question: str, full_prompt: str, session_id, emit,
+    system: str = logic.LOGIC_SYSTEM_PROMPT, writing: str = "Writing the map…",
+):
+    """One Claude turn whose answer is JSON; progress goes to `emit`, the answer comes back.
+
+    Every Claude feature goes through claude.ask, so every session gets the same read-only tools.
+    """
+    started = False
     async for event in claude.ask(
-        cli=state.claude_cli,
-        cwd=cwd,
-        snapshot=snapshot,
-        question=question,
-        full_prompt=full_prompt,
-        session_id=session_id,
-        system=logic.LOGIC_SYSTEM_PROMPT,
+        cli=state.claude_cli, cwd=cwd, snapshot=snapshot, question=question,
+        full_prompt=full_prompt, session_id=session_id, system=system,
     ):
         if event.kind == "tool":
             emit({"type": "tool", "text": event.text})
-        elif event.kind == "text" and not writing:
-            writing = True  # the answer itself is JSON; show that it's coming, not the JSON
-            emit({"type": "tool", "text": "Writing the map…"})
+        elif event.kind == "text" and not started:
+            started = True  # the answer itself is JSON; show that it's coming, not the JSON
+            emit({"type": "tool", "text": writing})
         elif event.kind == "done":
             return event.text, event.session_id
     return "", None
+
+
+async def pr_snapshot(*, client, pr: PRRef, overview: dict, cwd, sha: str) -> tuple[str, dict[str, list[int]]]:
+    """The PR as Claude sees it at the start of a session, and the lines it adds per file."""
+    files = await client.files(pr)
+    markdown = {
+        f["filename"]: claude.read_lines(root=cwd, path=f["filename"], start=1, end=10**9)
+        for f in files
+        if render.is_markdown(f["filename"]) and f["status"] != "removed"
+    }
+    snapshot = claude.build_context(
+        overview=overview, files=files, markdown=markdown,
+        activity=render.normalize_activity(overview), commit=sha,
+    )
+    changed = {
+        f["filename"]: sorted(render.parse_patch(f.get("patch"))[1])
+        for f in files
+        if f["status"] != "removed"
+    }
+    return snapshot, changed
 
 
 def _check(text: str, cwd) -> tuple[dict | None, list[str]]:
@@ -87,23 +108,9 @@ async def run_logic(*, state, client, token: str, login: str, pr: PRRef, overvie
             emit({"type": "tool", "text": f"Cloning {pr.owner}/{pr.repo}…"})
         cwd = await state.checkouts.worktree(owner=pr.owner, repo=pr.repo, sha=sha, token=token)
         emit({"type": "tool", "text": "Reading the PR…"})
-        files = await client.files(pr)
-        markdown = {
-            f["filename"]: claude.read_lines(root=cwd, path=f["filename"], start=1, end=10**9)
-            for f in files
-            if render.is_markdown(f["filename"]) and f["status"] != "removed"
-        }
-        snapshot = claude.build_context(
-            overview=overview, files=files, markdown=markdown,
-            activity=render.normalize_activity(overview), commit=sha,
-        )
-        changed = {
-            f["filename"]: sorted(render.parse_patch(f.get("patch"))[1])
-            for f in files
-            if f["status"] != "removed"
-        }
+        snapshot, changed = await pr_snapshot(client=client, pr=pr, overview=overview, cwd=cwd, sha=sha)
 
-        text, session = await _ask(
+        text, session = await ask_json(
             state=state, cwd=cwd, snapshot=snapshot, question=logic.LOGIC_REQUEST,
             full_prompt=logic.LOGIC_REQUEST, session_id=None, emit=emit,
         )
@@ -113,7 +120,7 @@ async def run_logic(*, state, client, token: str, login: str, pr: PRRef, overvie
             repair = logic.repair_request(problems)
             # If the session has expired, the replay still needs the first answer to fix it.
             full = f"{logic.LOGIC_REQUEST}\n\nYour previous answer:\n{text}\n\n{repair}"
-            text, session = await _ask(
+            text, session = await ask_json(
                 state=state, cwd=cwd, snapshot=snapshot, question=repair,
                 full_prompt=full, session_id=session, emit=emit,
             )

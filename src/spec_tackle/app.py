@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import claude, claude_api, logic_api, pages, refs_api, render
+from . import claude, claude_api, logic_api, pages, refs_api, render, walkthrough_api
 from .access import Access, Gate
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
@@ -101,6 +101,7 @@ app.add_middleware(HostCheck)  # added last, so it runs first
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 app.include_router(claude_api.router)
 app.include_router(logic_api.router)
+app.include_router(walkthrough_api.router)
 app.include_router(refs_api.router)
 
 
