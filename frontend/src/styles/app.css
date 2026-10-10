@@ -470,6 +470,7 @@ html.dark .claude-error { color: #fca5a5; }
 /* ...but follow the pointer while one is dragged (a group's steps are nodes of their own). */
 .logic-flow .react-flow__nodes:has(.dragging) .react-flow__node { transition: none; }
 .logic-flow .react-flow__node.dragging .logic-card, .logic-flow .react-flow__node.dragging .logic-box { cursor: grabbing; }
+.logic-flow .logic-card.faded { opacity: .25; }
 .logic-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid; }
 .logic-swatch.added { background: #d1fae5; border-color: #059669; }
 .logic-swatch.changed { background: #fef3c7; border-color: #d97706; }

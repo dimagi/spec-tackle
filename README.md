@@ -47,6 +47,7 @@ Opens `http://127.0.0.1:8765` through a one-time link (also printed in the termi
 - **Live**: the page checks GitHub every 30 seconds. New comments are flagged and announced, and the tab title shows an unread count. You're told when new commits land.
 - **Reviewer tools**: Open/All filter, hide bot comments, open-thread counts per section, `j`/`k` to jump between open threads, a PR switcher on the title (or `p`) listing PRs awaiting your review and ones you opened recently, and a **Finish review** button (Comment / Approve / Request changes).
 - **Modified specs**: changed blocks get a green marker, with a **Document ↔ Changes** toggle.
+- **Visualize**: a second tab with two modes. **Flow** asks Claude to draw what the PR does as a flowchart of pseudo-code steps, down to the real functions (needs Ask Claude). **Calls** shows the Python functions, methods and classes the PR adds or changes, with who calls them and what they call, read straight from the code with no Claude. Callers that weren't updated when a function's signature changed are marked in amber.
 - **Ask Claude (private)**: switch the composer to **Ask Claude**, or select text and press **a**, to ask Claude about a passage. Claude sees the whole PR (description, diffs, every comment) and can read the repo at the PR's commit. Questions and answers stay on your machine and are never posted. Needs [Claude Code](https://claude.com/claude-code) installed and signed in, and spec-tackle started with the `claude` extra (see the commands at the top).
 
 ## Development

@@ -5,3 +5,8 @@ export function externalLinks(el: Element | null, rel = "noopener") {
     a.rel = rel;
   });
 }
+
+/** A file's lines on GitHub at a commit. */
+export function githubBlobUrl(repo: { owner: string; repo: string }, sha: string, path: string, start: number, end: number): string {
+  return `https://github.com/${repo.owner}/${repo.repo}/blob/${sha}/${encodeURI(path)}#L${start}-L${end}`;
+}

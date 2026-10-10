@@ -16,7 +16,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from spec_tackle import app as web, claude_api, logic, refs  # noqa: E402
+from spec_tackle import app as web, calls_api, claude_api, logic, refs  # noqa: E402
 from spec_tackle.access import Access  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
 from spec_tackle.auth import NotSignedIn  # noqa: E402
@@ -28,6 +28,11 @@ PORT = 8799
 DATA = Path(tempfile.mkdtemp(prefix="spec-tackle-e2e-"))
 HEAD = "e2e0000headsha"
 DOC = "# Retry policy\n\nForms are sent once.\n\nFailures are retried with backoff. See Limits below.\n\n## Limits\n\nAt most five tries.\n"
+# Python for the call tree: backoff() gains a parameter, and send() still calls it the old way.
+BACKOFF = "def backoff(tries, base):\n    return base * 2 ** tries\n"
+FORMS = "from app.backoff import backoff\n\n\ndef send(form):\n    return backoff(3)\n"
+BACKOFF_FILE = {"filename": "app/backoff.py", "status": "modified", "additions": 2, "deletions": 2,
+                "patch": "@@ -1,2 +1,2 @@\n-def backoff(tries):\n-    return 2 ** tries\n+def backoff(tries, base):\n+    return base * 2 ** tries"}
 ME = {"__typename": "User", "login": "me", "avatarUrl": ""}
 ANN = {"__typename": "User", "login": "ann", "avatarUrl": ""}
 TITLES = {7: "Retry failed form submissions", 8: "Rename the sync queue", 9: "Offline mode", 10: "Bump the retry limit"}
@@ -65,6 +70,7 @@ class FakeGitHub:
         self.conversation: list[dict] = []
         self.reviews: list[dict] = []
         self.posted: list[dict] = []
+        self.python = False  # POST /e2e/python adds a Python change to the PR
 
     def _activity(self, pr) -> dict:
         # Only PR 7 has comments, so a second PR shows whether state leaks between them.
@@ -85,10 +91,11 @@ class FakeGitHub:
 
     async def files(self, pr):
         patch = "@@ -0,0 +1,9 @@\n" + "\n".join(f"+{line}" for line in DOC.rstrip("\n").split("\n"))
-        return [{"filename": "docs/retry.md", "status": "added", "additions": 9, "deletions": 0, "patch": patch}]
+        return [{"filename": "docs/retry.md", "status": "added", "additions": 9, "deletions": 0, "patch": patch},
+                *([BACKOFF_FILE] if self.python else [])]
 
     async def raw_file(self, owner, repo, path, ref):
-        return DOC.encode()
+        return {"app/backoff.py": BACKOFF, "app/forms.py": FORMS}.get(path, DOC).encode()
 
     async def render_markdown(self, pr, text):
         return f"<p>{text}</p>"
@@ -190,6 +197,13 @@ async def push():
     return {"ok": True}
 
 
+@app.post("/e2e/python")
+async def python():
+    """The PR also changes a Python function, so the call tree has something to show."""
+    app.state.session.gh.python = True
+    return {"ok": True}
+
+
 @app.post("/e2e/signout")
 async def signout():
     """GitHub stops accepting the token."""
@@ -207,6 +221,8 @@ class FakeCheckouts:
         (path / "retry.md").write_text(DOC)
         (path.parent / "app").mkdir(exist_ok=True)
         (path.parent / "app" / "retry.py").write_text("MAX_TRIES = 5\nBACKOFF_SECONDS = 1\n")
+        (path.parent / "app" / "backoff.py").write_text(BACKOFF)
+        (path.parent / "app" / "forms.py").write_text(FORMS)
         return path.parent
 
 
@@ -256,6 +272,7 @@ async def fake_ask(**kwargs):
 async def reset():
     """Start each test from the same PR."""
     app.state.session = FakeSession()
+    calls_api._cache.clear()
     app.state.store.close()
     app.state.store = Store.open(DATA / f"state-{next(ids)}.db")
     return {"ok": True}

@@ -1,12 +1,13 @@
 /** The Logic map as a React Flow chart, laid out by ELK. Loaded lazily with the Logic view's map. */
 import {
-  applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow,
+  applyNodeChanges, Background, Controls, MarkerType, ReactFlow, ReactFlowProvider, useReactFlow,
   type Edge, type NodeChange, type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { LogicBlock, LogicKind } from "../../api/types";
 import { layoutFlow, type FlowNode } from "../../lib/logicFlow";
+import { FIT, FitOnResize, Handles, TONE, useDarkMode } from "./chartParts";
 
 type Props = {
   blocks: LogicBlock[];
@@ -20,11 +21,6 @@ type Props = {
 
 const ICON: Record<LogicKind, string> = { entry: "▶", step: "▸", decision: "◇", loop: "↻", async: "⚡", exit: "■" };
 
-const TONE = {
-  added: "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60",
-  changed: "border-amber-500 bg-amber-50 dark:bg-amber-950/50",
-  unchanged: "border-stone-300 bg-white dark:border-stone-600 dark:bg-stone-900",
-};
 
 const countSteps = (b: LogicBlock): number => (b.children ?? []).reduce((n, c) => n + 1 + countSteps(c), 0);
 const countFunctions = (b: LogicBlock): number =>
@@ -63,14 +59,6 @@ function useActivate(block: LogicBlock) {
   };
 }
 
-function Handles() {
-  return (
-    <>
-      <Handle type="target" position={Position.Top} isConnectable={false} className="!border-0 !bg-transparent" />
-      <Handle type="source" position={Position.Bottom} isConnectable={false} className="!border-0 !bg-transparent" />
-    </>
-  );
-}
 
 function Card({ data }: NodeProps<FlowNode>) {
   const b = data.block;
@@ -110,7 +98,6 @@ function Box({ data }: NodeProps<FlowNode>) {
 }
 
 const nodeTypes = { card: Card, box: Box };
-const FIT = { duration: 300, padding: 0.12 };
 
 function Flow({ blocks, expanded, onFailed }: Pick<Props, "blocks" | "expanded" | "onFailed">) {
   const [graph, setGraph] = useState<{ nodes: FlowNode[]; edges: Edge[] } | null>(null);
@@ -162,16 +149,6 @@ function Flow({ blocks, expanded, onFailed }: Pick<Props, "blocks" | "expanded" 
   );
 }
 
-function useDarkMode() {
-  const read = () => document.documentElement.classList.contains("dark");
-  const [dark, setDark] = useState(read);
-  useEffect(() => {
-    const update = () => setDark(read());
-    window.addEventListener("spec-tackle:theme", update);
-    return () => window.removeEventListener("spec-tackle:theme", update);
-  }, []);
-  return dark;
-}
 
 export default function FlowChart({ blocks, expanded, selected, onActivate, onFailed }: Props) {
   const activated = useRef<string | null>(null);
@@ -188,16 +165,3 @@ export default function FlowChart({ blocks, expanded, selected, onActivate, onFa
   );
 }
 
-/** Re-fit when the chart's box changes width, e.g. when the function panel opens beside it. */
-function FitOnResize() {
-  const { fitView } = useReactFlow();
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    const box = ref.current?.closest(".logic-flow");
-    if (!box) return;
-    const observer = new ResizeObserver(() => fitView(FIT));
-    observer.observe(box);
-    return () => observer.disconnect();
-  }, [fitView]);
-  return <span ref={ref} hidden />;
-}

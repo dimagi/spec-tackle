@@ -1,7 +1,7 @@
 import { useLogicFunctions } from "../../api/queries";
 import type { LogicBlock, LogicFunction } from "../../api/types";
-import { Html } from "../../components/Html";
 import type { PRRef } from "../../state/storage";
+import { SourceLines, SourceLink } from "./Source";
 
 type Props = {
   pr: PRRef;
@@ -10,10 +10,12 @@ type Props = {
   headSha: string;
   onClose: () => void;
   onShowInReview: (path: string, line: number) => void;
+  /** Open a function in the call tree; absent when the PR changes no Python. */
+  onShowCalls?: (path: string, line: number) => void;
 };
 
 /** The real functions behind a leaf block, with this PR's changes highlighted. */
-export function FunctionPanel({ pr, mapId, block, headSha, onClose, onShowInReview }: Props) {
+export function FunctionPanel({ pr, mapId, block, headSha, onClose, onShowInReview, onShowCalls }: Props) {
   const fns = useLogicFunctions(mapId, block.id);
   return (
     <aside aria-label={block.label}
@@ -29,7 +31,7 @@ export function FunctionPanel({ pr, mapId, block, headSha, onClose, onShowInRevi
           <p className="text-sm text-stone-500">No single function implements this{block.children?.length ? " block's steps" : " step"}.</p>
         )}
         {fns.data?.functions.map((fn, i) => (
-          <Function key={i} pr={pr} fn={fn} headSha={headSha} onShowInReview={onShowInReview}
+          <Function key={i} pr={pr} fn={fn} headSha={headSha} onShowInReview={onShowInReview} onShowCalls={onShowCalls}
             step={fn.step !== block.label ? fn.step : null} />
         ))}
       </div>
@@ -41,9 +43,12 @@ type FunctionProps = {
   pr: PRRef; fn: LogicFunction; headSha: string; onShowInReview: Props["onShowInReview"];
   /** The step this function belongs to, when the panel is for a block with steps inside. */
   step: string | null;
+  onShowCalls: Props["onShowCalls"];
 };
 
-function Function({ pr, fn, headSha, onShowInReview, step }: FunctionProps) {
+function Function({ pr, fn, headSha, onShowInReview, step, onShowCalls }: FunctionProps) {
+  // The Calls view finds the function from its place; a Python file is all it needs.
+  const showCalls = onShowCalls && fn.path.endsWith(".py") && !fn.missing ? () => onShowCalls(fn.path, fn.start) : null;
   const firstChange = fn.lines.find((l) => l.changed)?.n;
   const untouched = !fn.inDiff || firstChange === undefined;
   return (
@@ -53,31 +58,21 @@ function Function({ pr, fn, headSha, onShowInReview, step }: FunctionProps) {
         <div className="font-mono text-sm font-semibold">{fn.symbol}</div>
         <div className="font-mono text-xs text-stone-500">{fn.path}:{fn.start}–{fn.end}</div>
         {untouched && <span className="text-xs text-stone-500">unchanged by this PR</span>}
-        <span className="ml-auto">
-          {fn.inDiff ? (
-            <button type="button" className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300"
-              onClick={() => onShowInReview(fn.path, firstChange ?? fn.start)}>
-              Show in Code view
+        <span className="ml-auto flex gap-3">
+          {showCalls && (
+            <button type="button" className="text-xs font-semibold text-violet-700 hover:underline dark:text-violet-300"
+              title="Who calls this, and what it calls" onClick={showCalls}>
+              Calls
             </button>
-          ) : (
-            <a className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300" target="_blank" rel="noopener"
-              href={`https://github.com/${pr.owner}/${pr.repo}/blob/${headSha}/${fn.path}#L${fn.start}-L${fn.end}`}>
-              View on GitHub
-            </a>
           )}
+          <SourceLink pr={pr} head={headSha} path={fn.path} start={fn.start} end={fn.end} inDiff={fn.inDiff}
+            line={firstChange ?? fn.start} onShowInReview={onShowInReview} />
         </span>
       </div>
       {fn.missing ? (
         <p className="text-sm text-stone-500">{fn.missing}</p>
       ) : (
-        <pre className="logic-code">
-          {fn.lines.map((l) => (
-            <div key={l.n} className={`logic-line${l.changed ? " changed" : ""}`}>
-              <span className="ln">{l.n}</span>
-              <Html as="code" html={l.html} />
-            </div>
-          ))}
-        </pre>
+        <SourceLines lines={fn.lines} />
       )}
     </section>
   );

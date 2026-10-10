@@ -25,7 +25,8 @@ import { useKeyboard } from "./hooks/useKeyboard";
 import type { MarginEngine } from "./hooks/useMarginEngine";
 import { useMermaid } from "./hooks/useMermaid";
 import { Margin } from "./Margin";
-import { LogicView } from "../logic/LogicView";
+import { hasPython } from "../../lib/callTree";
+import { LogicView, type LogicMode } from "../logic/LogicView";
 import { GutterButton } from "./GutterButton";
 import { PageTabs } from "./PageTabs";
 import { PrSwitcher } from "./PrSwitcher";
@@ -284,15 +285,31 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
 
   const [reviewOpen, setReviewOpen] = useState(false);
 
-  // The page's views: Review, and Logic when Claude is available. Kept in ?view= so reloads keep it.
+  // The page's views: Review, and Logic when Claude is available or there's Python to map.
+  // Kept in ?view= (and Logic's mode in ?mode=) so reloads keep them.
   const [params, setParams] = useSearchParams();
-  const tab = page.claude && params.get("view") === "logic" ? "logic" : "review";
+  const python = useMemo(() => hasPython(page.files), [page.files]);
+  const logicAvailable = page.claude || python;
+  const tab = logicAvailable && params.get("view") === "logic" ? "logic" : "review";
+  // The link's ?mode= first, then the last one chosen; Flow when Claude can draw it.
+  const param = params.get("mode");
+  const wanted: LogicMode = param === "flow" || param === "calls" ? param : loadPref<LogicMode>(pr, "logicMode", page.claude ? "flow" : "calls");
+  // Calls needs Python; without Claude, Flow still explains what it needs.
+  const logicMode: LogicMode = python ? wanted : "flow";
+  const setLogicMode = (mode: LogicMode) => {
+    savePref(pr, "logicMode", mode);
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("mode", mode);
+      return next;
+    });
+  };
   const [logicVisited, setLogicVisited] = useState(tab === "logic");
   const setTab = (id: string) =>
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       if (id === "logic") next.set("view", "logic");
-      else next.delete("view");
+      else { next.delete("view"); next.delete("mode"); }
       return next;
     });
   useEffect(() => {
@@ -452,8 +469,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         newCommits={activity.headSha !== renderedSha}
         onRefresh={() => live.refresh()}
         onFinishReview={() => setReviewOpen(true)}
-        tabs={page.claude && (
-          <PageTabs tabs={[{ id: "review", label: "Code view" }, { id: "logic", label: "Logic view" }]} active={tab} onSelect={setTab} />
+        tabs={logicAvailable && (
+          <PageTabs tabs={[{ id: "review", label: "Code view" }, { id: "logic", label: "Visualize" }]} active={tab} onSelect={setTab} />
         )}
         settings={page.claude && hasDocs && (
           <button type="button" role="switch" aria-checked={autoRefs} onClick={toggleAutoRefs}
@@ -470,7 +487,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       />
       {logicVisited && (
         <div hidden={tab !== "logic"}>
-          <LogicView pr={pr} head={activity.headSha} onShowInReview={showInReview} />
+          <LogicView pr={pr} head={activity.headSha} onShowInReview={showInReview}
+            claude={page.claude} python={python} mode={logicMode} onMode={setLogicMode} />
         </div>
       )}
       <div className="flex" hidden={tab !== "review"}>
