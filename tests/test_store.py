@@ -81,7 +81,7 @@ def test_migrates_an_old_database(tmp_path):
     s = Store.open(path)
     assert s.threads_for_pr(login="me", pr=PR) == []
     s.close()
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (5,)
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (6,)
     s = Store.open(path)
     assert s.latest_logic_map(login="me", pr=PR) is None
     s.close()
@@ -152,3 +152,47 @@ def test_regenerating_doc_refs_for_the_same_commit_replaces_them(store):
     store.save_doc_refs(login="me", pr=PR, path="docs/a.md", head_sha="abc", refs=[])
     assert store.latest_doc_refs(login="me", pr=PR, path="docs/a.md")["refs"] == []
     assert store._db.execute("SELECT COUNT(*) FROM doc_refs").fetchone()[0] == 1
+
+
+def _map(store, sha="abc", login="me"):
+    return store.save_logic_map(login=login, pr=PR, head_sha=sha, summary="s",
+                                blocks=[], changed_lines={})
+
+
+def _trace(store, map_id, h="h1", proposed=False, login="me", entry="send"):
+    return store.save_trace(login=login, map_id=map_id, entry_id=entry, input_hash=h,
+                            inputs=[{"name": "a", "description": "d", "value": 1}],
+                            steps=[{"blockId": "send", "input": {}, "output": {}, "note": "n"}],
+                            outcome={"kind": "stopped", "message": "m"}, proposed=proposed)
+
+
+def test_traces_round_trip_and_are_private(store):
+    map_id = _map(store)
+    trace_id = _trace(store, map_id, proposed=True)
+    got = store.trace(login="me", trace_id=trace_id)
+    assert got["mapId"] == map_id and got["entryId"] == "send" and got["proposed"] is True
+    assert got["inputs"][0]["value"] == 1 and got["outcome"]["kind"] == "stopped"
+    assert store.trace(login="you", trace_id=trace_id) is None
+    assert store.trace_by_hash(login="me", map_id=map_id, entry_id="send", input_hash="h1")["id"] == trace_id
+    assert store.proposed_trace(login="me", map_id=map_id, entry_id="send")["id"] == trace_id
+    assert store.proposed_trace(login="me", map_id=map_id, entry_id="other") is None
+
+
+def test_latest_trace_follows_use(store):
+    map_id = _map(store)
+    first = _trace(store, map_id, "h1")
+    second = _trace(store, map_id, "h2")
+    assert store.latest_trace(login="me", map_id=map_id, entry_id="send")["id"] == second
+    store.touch_trace(trace_id=first)
+    assert store.latest_trace(login="me", map_id=map_id, entry_id="send")["id"] == first
+
+
+def test_regenerating_a_map_for_the_same_commit_drops_its_traces(store):
+    old = _map(store, "abc")
+    other = _map(store, "def")
+    gone = _trace(store, old)
+    kept = _trace(store, other)
+    new = _map(store, "abc")
+    assert new != old
+    assert store.trace(login="me", trace_id=gone) is None
+    assert store.trace(login="me", trace_id=kept) is not None

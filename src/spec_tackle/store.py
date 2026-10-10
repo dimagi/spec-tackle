@@ -62,6 +62,15 @@ _MIGRATIONS = [
     ALTER TABLE doc_refs ADD COLUMN based_on TEXT;
     ALTER TABLE doc_refs ADD COLUMN outdated INTEGER NOT NULL DEFAULT 0;
     """,
+    # 6: Logic walkthrough traces (see docs/specs/2026-10-10-logic-walkthrough-design.md)
+    """
+    CREATE TABLE logic_traces (
+        id TEXT PRIMARY KEY, login TEXT NOT NULL, map_id TEXT NOT NULL, entry_id TEXT NOT NULL,
+        input_hash TEXT NOT NULL, inputs TEXT NOT NULL, steps TEXT NOT NULL, outcome TEXT NOT NULL,
+        proposed INTEGER NOT NULL, used_at TEXT NOT NULL,
+        UNIQUE (login, map_id, entry_id, input_hash)
+    );
+    """,
 ]
 
 
@@ -85,6 +94,11 @@ def make_private(path: Path) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _now_exact() -> str:
+    """Like _now, with microseconds: traces used within the same second still order right."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 class Store:
@@ -192,14 +206,25 @@ class Store:
         self, *, login: str, pr: PRRef, head_sha: str, summary: str, blocks: list,
         changed_lines: dict[str, list[int]],
     ) -> str:
-        """Store a map; one for the same login, PR and commit is replaced."""
+        """Store a map; one for the same login, PR and commit is replaced, and its traces dropped."""
         map_id = str(uuid.uuid4())
-        self._db.execute(
-            "INSERT OR REPLACE INTO logic_maps (id, login, owner, repo, number, head_sha, summary,"
-            " tree, changed_lines, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (map_id, login, pr.owner, pr.repo, pr.number, head_sha, summary,
-             json.dumps(blocks), json.dumps(changed_lines), _now()),
-        )
+        self._db.execute("BEGIN")
+        try:
+            self._db.execute(
+                "DELETE FROM logic_traces WHERE map_id IN (SELECT id FROM logic_maps"
+                " WHERE login = ? AND owner = ? AND repo = ? AND number = ? AND head_sha = ?)",
+                (login, pr.owner, pr.repo, pr.number, head_sha),
+            )
+            self._db.execute(
+                "INSERT OR REPLACE INTO logic_maps (id, login, owner, repo, number, head_sha, summary,"
+                " tree, changed_lines, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (map_id, login, pr.owner, pr.repo, pr.number, head_sha, summary,
+                 json.dumps(blocks), json.dumps(changed_lines), _now()),
+            )
+            self._db.execute("COMMIT")
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            raise
         return map_id
 
     def latest_logic_map(self, *, login: str, pr: PRRef) -> dict | None:
@@ -228,6 +253,67 @@ class Store:
             "blocks": json.loads(row["tree"]),
             "changedLines": json.loads(row["changed_lines"]),
             "createdAt": row["created_at"],
+        }
+
+    # -- Logic walkthrough traces ---------------------------------------------------
+
+    def save_trace(
+        self, *, login: str, map_id: str, entry_id: str, input_hash: str, inputs: list,
+        steps: list, outcome: dict, proposed: bool,
+    ) -> str:
+        """Store a trace; one for the same login, map, entry and inputs is replaced."""
+        trace_id = str(uuid.uuid4())
+        self._db.execute(
+            "INSERT OR REPLACE INTO logic_traces (id, login, map_id, entry_id, input_hash, inputs,"
+            " steps, outcome, proposed, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (trace_id, login, map_id, entry_id, input_hash, json.dumps(inputs), json.dumps(steps),
+             json.dumps(outcome), int(proposed), _now_exact()),
+        )
+        return trace_id
+
+    def trace(self, *, login: str, trace_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM logic_traces WHERE id = ? AND login = ?", (trace_id, login)
+        ).fetchone()
+        return self._trace(row) if row else None
+
+    def trace_by_hash(self, *, login: str, map_id: str, entry_id: str, input_hash: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM logic_traces WHERE login = ? AND map_id = ? AND entry_id = ? AND input_hash = ?",
+            (login, map_id, entry_id, input_hash),
+        ).fetchone()
+        return self._trace(row) if row else None
+
+    def latest_trace(self, *, login: str, map_id: str, entry_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM logic_traces WHERE login = ? AND map_id = ? AND entry_id = ?"
+            " ORDER BY used_at DESC, rowid DESC LIMIT 1",
+            (login, map_id, entry_id),
+        ).fetchone()
+        return self._trace(row) if row else None
+
+    def proposed_trace(self, *, login: str, map_id: str, entry_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM logic_traces WHERE login = ? AND map_id = ? AND entry_id = ? AND proposed = 1"
+            " ORDER BY used_at DESC LIMIT 1",
+            (login, map_id, entry_id),
+        ).fetchone()
+        return self._trace(row) if row else None
+
+    def touch_trace(self, *, trace_id: str) -> None:
+        self._db.execute("UPDATE logic_traces SET used_at = ? WHERE id = ?", (_now_exact(), trace_id))
+
+    @staticmethod
+    def _trace(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "mapId": row["map_id"],
+            "entryId": row["entry_id"],
+            "inputs": json.loads(row["inputs"]),
+            "steps": json.loads(row["steps"]),
+            "outcome": json.loads(row["outcome"]),
+            "proposed": bool(row["proposed"]),
+            "usedAt": row["used_at"],
         }
 
     # -- Document cross-references ---------------------------------------------
