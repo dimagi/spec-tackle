@@ -13,6 +13,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import render
+
 MAX_FILES = 5000
 MAX_BYTES = 1_000_000
 MAX_HOPS = 3
@@ -113,6 +115,7 @@ def build_index(root: Path, max_files: int | None = None, max_bytes: int | None 
         if file.stat().st_size > max_bytes:
             index.skipped.append({"path": path, "reason": "too large"})
             continue
+        # A syntax error, null bytes, or code nested too deeply to parse (RecursionError).
         try:
             tree = ast.parse(file.read_text("utf-8", "replace"), filename=path)
             name = module_name(path)
@@ -120,14 +123,8 @@ def build_index(root: Path, max_files: int | None = None, max_bytes: int | None 
             module = Module(path=path, name=name, package=package, tree=tree)
             _read_imports(module)
             _read_defs(module, tree.body)
-        except SyntaxError as exc:
-            index.skipped.append({"path": path, "reason": f"syntax error: line {exc.lineno}: {exc.msg}"})
-            continue
-        except ValueError as exc:  # e.g. null bytes
-            index.skipped.append({"path": path, "reason": f"syntax error: {exc}"})
-            continue
-        except (RecursionError, MemoryError):  # e.g. a generated expression thousands of terms long
-            index.skipped.append({"path": path, "reason": "too complex"})
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            index.skipped.append({"path": path, "reason": "syntax error"})
             continue
         index.modules[path] = module
         for d in module.defs.values():
@@ -144,8 +141,16 @@ def _python_files(root: Path):
 
 
 def _read_imports(module: Module) -> None:
-    # Breadth first, so a module-level import wins over one inside a function.
-    for node in ast.walk(module.tree):
+    # Statements only (imports are never expressions), breadth first so a module-level
+    # import wins over one inside a function.
+    queue = deque(module.tree.body)
+    while queue:
+        node = queue.popleft()
+        if isinstance(node, _DEF):
+            queue.extend(node.body)
+        else:
+            for block in _blocks(node):
+                queue.extend(block)
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.asname:
@@ -227,29 +232,28 @@ class Edge:
 def resolve_edges(index: Index) -> list[Edge]:
     """Every call and reference from one repo definition to another that `ast` can pin down."""
     resolver = _Resolver(index)
+    return _merge(
+        (d.id, callee.id, kind, (line,))
+        for module in index.modules.values()
+        for d in module.defs.values()
+        for callee, kind, line in resolver.uses(module, d)
+    )
+
+
+def _merge(uses) -> list[Edge]:
+    """One edge per (caller, callee): the strongest kind, and every line."""
     found: dict[tuple[str, str], tuple[str, set[int]]] = {}
-
-    def add(caller: Definition, callee: Definition, kind: str, line: int) -> None:
-        key = (caller.id, callee.id)
-        old_kind, lines = found.get(key, (kind, set()))
-        lines.add(line)
-        found[key] = (min(old_kind, kind, key=_RANK.__getitem__), lines)
-
-    for module in index.modules.values():
-        for d in module.defs.values():
-            try:
-                uses = list(resolver.uses(module, d))
-            except RecursionError:  # a pathological definition loses its edges, not the whole tree
-                continue
-            for callee, kind, line in uses:
-                add(d, callee, kind, line)
+    for caller, callee, kind, lines in uses:
+        old_kind, old_lines = found.get((caller, callee), (kind, set()))
+        found[(caller, callee)] = (min(old_kind, kind, key=_RANK.__getitem__), old_lines | set(lines))
     return [Edge(caller, callee, kind, tuple(sorted(lines))) for (caller, callee), (kind, lines) in found.items()]
 
 
 class _Resolver:
     def __init__(self, index: Index):
         self.index = index
-        self._active: set[tuple] = set()
+        self._bases_of: dict[str, list[Definition]] = {}
+        self._resolving: set[str] = set()
         self.methods: dict[str, list[Definition]] = {}
         for d in index.defs.values():
             name = d.qualname.rpartition(".")[2]
@@ -258,7 +262,7 @@ class _Resolver:
 
     def uses(self, module: Module, d: Definition):
         """(callee, kind, line) for each use in `d`'s own body; nested definitions are their own callers."""
-        chain = self._chain(d)
+        chain = _chain(self.index, d)
         if d.kind == "class":
             for base in d.node.bases:
                 target = self._expr(module, chain[1:], base)
@@ -327,32 +331,34 @@ class _Resolver:
 
     def _member(self, cls: Definition, name: str, skip_self: bool = False, seen=None) -> Definition | None:
         """`name` on a class or, in order, its repo base classes."""
-        seen = seen or set()
-        # Bases written `Other.Inner` resolve through _expr, which starts afresh: `_active`
-        # stops classes whose bases point at each other from looping.
-        key = (cls.id, name, skip_self)
-        if cls.id in seen or key in self._active:
+        seen = set() if seen is None else seen
+        if cls.id in seen:
             return None
         seen.add(cls.id)
-        self._active.add(key)
-        try:
-            return self._find_member(cls, name, skip_self, seen)
-        finally:
-            self._active.discard(key)
-
-    def _find_member(self, cls: Definition, name: str, skip_self: bool, seen: set) -> Definition | None:
-        module = self.index.modules[cls.path]
         if not skip_self:
-            found = module.defs.get(f"{cls.qualname}.{name}")
+            found = self.index.modules[cls.path].defs.get(f"{cls.qualname}.{name}")
             if found:
                 return found
-        for base in cls.node.bases:
-            parent = self._expr(module, self._chain(cls)[1:], base)
-            if parent and parent.kind == "class":
-                found = self._member(parent, name, seen=seen)
-                if found:
-                    return found
+        for parent in self._bases(cls):
+            found = self._member(parent, name, seen=seen)
+            if found:
+                return found
         return None
+
+    def _bases(self, cls: Definition) -> list[Definition]:
+        """A class's repo base classes, resolved once. Bases that lead back to it resolve to nothing."""
+        if cls.id in self._bases_of:
+            return self._bases_of[cls.id]
+        if cls.id in self._resolving:
+            return []
+        self._resolving.add(cls.id)
+        try:
+            module, scope = self.index.modules[cls.path], _chain(self.index, cls)[1:]
+            found = [b for b in (self._expr(module, scope, base) for base in cls.node.bases) if b and b.kind == "class"]
+        finally:
+            self._resolving.discard(cls.id)
+        self._bases_of[cls.id] = found
+        return found
 
     def _known_base(self, module: Module, chain: list[Definition], expr: ast.expr) -> bool:
         """True when a receiver is a module, class or other known name: then a miss isn't 'probable'."""
@@ -361,11 +367,13 @@ class _Resolver:
             return False
         return parts[0] in module.imports or self._name(module, chain, parts[0], imports=False) is not None
 
-    def _chain(self, d: Definition) -> list[Definition]:
-        chain = [d]
-        while chain[-1].parent:
-            chain.append(self.index.defs[chain[-1].parent])
-        return chain
+
+def _chain(index: Index, d: Definition) -> list[Definition]:
+    """A definition and the definitions around it, innermost first."""
+    chain = [d]
+    while chain[-1].parent:
+        chain.append(index.defs[chain[-1].parent])
+    return chain
 
 
 def _own_nodes(node: ast.AST):
@@ -405,7 +413,6 @@ def _dotted(expr: ast.Attribute) -> list[str] | None:
 
 # -- what the PR changed -----------------------------------------------------
 
-_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 # The same rule as the Logic view's isTestPath (frontend/src/lib/logicFlow.ts).
 _TEST_PATHS = [
@@ -426,9 +433,9 @@ def changed_lines(patch: str | None) -> tuple[set[int], dict[int, list[str]]]:
     deleted: dict[int, list[str]] = {}
     line = 0
     for row in (patch or "").splitlines():
-        hunk = _HUNK.match(row)
+        hunk = render._HUNK_RE.match(row)
         if hunk:
-            line = int(hunk.group(1))
+            line = int(hunk.group(3))
         elif row.startswith("+"):
             added.add(line)
             line += 1
@@ -566,14 +573,12 @@ def analyse(root: Path, files: list[dict]) -> dict:
 
     owner = {d.id: _owner(index, d).id for d in index.defs.values()}
     root_ids = {i for i in changed if owner[i] == i}
-    merged: dict[tuple[str, str], tuple[str, set[int]]] = {}
-    for e in resolve_edges(index):
-        a, b = owner[e.caller], owner[e.callee]
-        if a == b and e.caller != e.callee:
-            continue  # a parent calling its own nested function
-        kind, lines = merged.get((a, b), (e.kind, set()))
-        merged[(a, b)] = (min(kind, e.kind, key=_RANK.__getitem__), lines | set(e.lines))
-    edges = [Edge(a, b, kind, tuple(sorted(lines))) for (a, b), (kind, lines) in merged.items()]
+    edges = _merge(
+        (owner[e.caller], owner[e.callee], e.kind, e.lines)
+        for e in resolve_edges(index)
+        # A parent calling its own nested function isn't an edge once they're one node.
+        if not (owner[e.caller] == owner[e.callee] and e.caller != e.callee)
+    )
 
     dist, (up, down), cut = neighbourhood(edges, root_ids)
     nodes = []
@@ -603,15 +608,12 @@ def analyse(root: Path, files: list[dict]) -> dict:
 
 def _owner(index: Index, d: Definition) -> Definition:
     """What a definition is shown as: nested functions (and classes inside functions) fold into the outermost function."""
-    chain = [d]
-    while chain[-1].parent:
-        chain.append(index.defs[chain[-1].parent])
-    functions = [c for c in chain if c.kind != "class"]
+    functions = [c for c in _chain(index, d) if c.kind != "class"]
     return functions[-1] if functions else d
 
 
 def _other(index: Index, files: list[dict], changes: dict[str, tuple[set[int], dict[int, list[str]]]]) -> list[dict]:
-    skipped = {s["path"]: "too large" if s["reason"] == "too large" else "syntax error" for s in index.skipped}
+    skipped = {s["path"]: s["reason"] for s in index.skipped}
     other = []
     for f in files:
         path = f["filename"]

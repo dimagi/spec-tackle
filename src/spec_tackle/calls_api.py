@@ -7,13 +7,15 @@ not in the store, and it works without Claude.
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 from collections import OrderedDict
+from concurrent.futures import ProcessPoolExecutor
 
 from fastapi import APIRouter, HTTPException, Request
 
 from . import calls, logic, render
 from .checkout import CheckoutError, CommitGone
-from .github import GitHubError, PRRef
+from .github import PRRef
 
 router = APIRouter()
 
@@ -22,11 +24,23 @@ CACHE_SIZE = 8
 _cache: OrderedDict[tuple, asyncio.Future] = OrderedDict()
 
 
+async def _in_child(fn, *args):
+    """Run `fn` in a fresh process: parsing a big repo holds hundreds of MB that a
+    long-lived server would never give back, and the GIL while it runs."""
+    with ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn")) as pool:
+        return await asyncio.get_running_loop().run_in_executor(pool, fn, *args)
+
+
+# Tests swap this for a thread, so they can watch and replace `calls.analyse`.
+run_analysis = _in_child
+
+
 async def _compute(state, client, pr: PRRef, head: str) -> dict:
     token = await state.session.token()
-    files = await client.files(pr)
-    root = await state.checkouts.worktree(owner=pr.owner, repo=pr.repo, sha=head, token=token)
-    tree = await asyncio.to_thread(calls.analyse, root, files)
+    files, root = await asyncio.gather(
+        client.files(pr), state.checkouts.worktree(owner=pr.owner, repo=pr.repo, sha=head, token=token),
+    )
+    tree = await run_analysis(calls.analyse, root, files)
     changed = {
         f["filename"]: set(render.parse_patch(f.get("patch"))[1]) for f in files if f["status"] != "removed"
     }
@@ -55,9 +69,7 @@ async def _analysis(request: Request, owner: str, repo: str, number: int, head: 
             raise HTTPException(409, str(exc))
         if isinstance(exc, CheckoutError):
             raise HTTPException(502, f"Couldn't fetch the repository: {exc}")
-        if isinstance(exc, GitHubError):
-            raise HTTPException(502, f"Couldn't read the PR from GitHub: {exc}")
-        raise
+        raise  # GitHubError and NotSignedIn go to the app's handlers (which also sign out)
 
 
 @router.get("/api/pr/{owner}/{repo}/{number}/calls")

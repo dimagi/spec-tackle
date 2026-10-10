@@ -145,7 +145,7 @@ def test_ignored_directories_big_files_and_syntax_errors_are_skipped(tmp_path):
     index = calls.build_index(tmp_path, max_bytes=50)
     assert set(index.modules) == {"app.py"}
     reasons = {s["path"]: s["reason"] for s in index.skipped}
-    assert reasons["broken.py"].startswith("syntax error")
+    assert reasons["broken.py"] == "syntax error"
     assert reasons["big.py"] == "too large"
     assert index.truncated is False
 

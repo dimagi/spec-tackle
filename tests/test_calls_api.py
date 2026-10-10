@@ -1,3 +1,4 @@
+import asyncio
 import sys
 
 import pytest
@@ -21,7 +22,9 @@ FILES = [
 
 
 @pytest.fixture(autouse=True)
-def fresh_cache():
+def fresh_cache(monkeypatch):
+    # In a thread, not a child process, so tests can watch and replace calls.analyse.
+    monkeypatch.setattr(calls_api, "run_analysis", lambda fn, *args: asyncio.to_thread(lambda: calls.analyse(*args)))
     calls_api._cache.clear()
     yield
     calls_api._cache.clear()
@@ -114,3 +117,22 @@ def test_the_routes_need_the_access_cookie_and_a_sign_in(calls_app):
     assert stranger.get(f"{CALLS}/source", params={"head": HEAD, "node": "x"}).status_code == 403
     app.state.session.signed_in = False
     assert calls_app.get(CALLS, params={"head": HEAD}).status_code == 401
+
+
+def test_the_analysis_runs_in_a_child_process(tmp_path):
+    """The real runner: a fresh process gives the parse's memory back when it ends."""
+    (tmp_path / "m.py").write_text("def f():\n    pass\n")
+    files = [{"filename": "m.py", "status": "added", "patch": "@@ -0,0 +1,2 @@\n+def f():\n+    pass"}]
+    tree = asyncio.run(calls_api._in_child(calls.analyse, tmp_path, files))
+    assert [n["id"] for n in tree["nodes"]] == ["m.py::f"]
+
+
+def test_a_github_failure_goes_to_the_apps_handler(calls_app):
+    from spec_tackle.github import GitHubError
+
+    async def files(pr):
+        raise GitHubError("Bad credentials", status=401)
+
+    app.state.session.gh.files = files
+    response = calls_app.get(CALLS, params={"head": HEAD})
+    assert response.status_code == 401 and response.json().get("signedOut") is True
