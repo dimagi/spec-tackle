@@ -143,3 +143,15 @@ def test_the_prompt_forbids_running_code_and_names_every_danger_kind():
     for kind in walk.DANGER_KINDS:
         assert f'"{kind}"' in prompt
     assert "even when these inputs don't reach it" in prompt
+
+
+def test_a_non_string_block_id_is_a_problem_not_a_crash():
+    for bad in (["x"], 5, {"id": "send"}):
+        text = problems_for(answer(steps=[step(bad), step("give-up")]))
+        assert "is not a step (leaf) of the map" in text
+
+
+def test_a_fixed_run_with_an_unhashable_input_name_is_a_problem_not_a_crash():
+    given = [{"name": "form", "description": "The submitted form", "value": {"id": 8}}]
+    text = problems_for(answer(inputs=[{"name": ["x"], "value": 1}]), inputs=given)
+    assert "inputs: must be exactly the inputs you were given; don't change them" in text

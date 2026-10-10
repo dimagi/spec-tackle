@@ -171,7 +171,7 @@ def _small(value) -> bool:
 
 
 def _safe_values(items: list) -> dict | None:
-    if not all(isinstance(i, dict) and "name" in i for i in items):
+    if not all(isinstance(i, dict) and isinstance(i.get("name"), str) for i in items):
         return None
     return {i["name"]: i.get("value") for i in items}
 
