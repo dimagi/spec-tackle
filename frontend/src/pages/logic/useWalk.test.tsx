@@ -69,3 +69,36 @@ test("run sends the inputs", async () => {
   await act(() => result.current.run({ a: 2 }));
   expect(posts).toEqual([{ entry: "send", inputs: { a: 2 } }]);
 });
+
+test("a failing stream shows an error, does not loop, and Try again reopens it", async () => {
+  current = { ...empty, running: true };
+  const { result } = renderHook(() => useWalk("m1", "send"), { wrapper });
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  act(() => FakeEventSource.instances[0].onerror?.());
+  await waitFor(() => expect(result.current.error).toBe("Lost contact with the walkthrough run"));
+  await new Promise((r) => setTimeout(r, 50));
+  expect(FakeEventSource.instances).toHaveLength(1);
+  await act(() => result.current.run());
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+});
+
+test("switching entries mid-run does not leak the old entry's run", async () => {
+  current = { ...empty, starting: [{ name: "a", description: "d", value: 1 }] };
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const base = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") await gate;
+    if (String(url).includes("entry=job")) return new Response(JSON.stringify(current));
+    return base(url, init);
+  }));
+  const { result, rerender } = renderHook(({ entry }) => useWalk("m1", entry), { wrapper, initialProps: { entry: "send" } });
+  await waitFor(() => expect(result.current.data).toBeDefined());
+  let pending!: Promise<void>;
+  act(() => { pending = result.current.run({ a: 1 }); });
+  rerender({ entry: "job" });
+  await act(async () => { release(); await pending; });
+  expect(result.current.progress).toBeNull();
+  expect(result.current.posting).toBe(false);
+  expect(FakeEventSource.instances.filter((s) => s.url.includes("entry=job"))).toHaveLength(0);
+});
