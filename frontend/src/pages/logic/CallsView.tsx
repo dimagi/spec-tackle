@@ -1,18 +1,20 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useCallTree } from "../../api/queries";
 import type { CallEdge, CallNode, CallTree } from "../../api/types";
-import { callName, connected, isRoot, visibleTree, type CallFilters } from "../../lib/callTree";
+import { callName, connected, isRoot, matchCallNode, visibleTree } from "../../lib/callTree";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 import { CallPanel } from "./CallPanel";
 
 // React Flow and ELK load only when a tree is shown.
 const CallChart = lazy(() => import("./CallChart"));
 
+export type CallFocus = { path: string; line: number };
+
 type Props = {
   pr: PRRef;
   head: string;
-  /** A node to focus and open, e.g. from the Flow view's function panel. A new object each time. */
-  focus: { id: string } | null;
+  /** A function to focus and open, by its place (e.g. from Flow's panel). A new object each time. */
+  focus: CallFocus | null;
   onShowInReview: (path: string, line: number) => void;
 };
 
@@ -68,13 +70,15 @@ function TreeView({ pr, tree, focus, onShowInReview }: { pr: PRRef; tree: CallTr
   const [tests, setTests] = useState(() => loadPref(pr, "callsShowTests", onlyTests));
   const [probable, setProbable] = useState(true);
   const [breakage, setBreakage] = useState(false);
-  const [selected, setSelected] = useState<string | null>(focus?.id ?? null);
-  const [focused, setFocused] = useState<string | null>(focus?.id ?? null);
+  const focusId = (f: CallFocus | null) => (f ? matchCallNode(tree, f.path, f.line)?.id ?? null : null);
+  const [selected, setSelected] = useState<string | null>(() => focusId(focus));
+  const [focused, setFocused] = useState<string | null>(() => focusId(focus));
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (focus) { setSelected(focus.id); setFocused(focus.id); }
-  }, [focus]);
+    const id = focusId(focus);
+    if (id) { setSelected(id); setFocused(id); }
+  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setDepth = (next: { up: number; down: number }) => {
     setDepthState(next);
@@ -85,14 +89,12 @@ function TreeView({ pr, tree, focus, onShowInReview }: { pr: PRRef; tree: CallTr
     setTests(!tests);
   };
 
-  const filters: CallFilters = { ...depth, tests, probable, breakage };
-  const visible = useMemo(() => visibleTree(tree, filters), [tree, depth.up, depth.down, tests, probable, breakage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const visible = useMemo(() => visibleTree(tree, { ...depth, tests, probable, breakage }), [tree, depth, tests, probable, breakage]);
   const faded = useMemo(() => {
     if (!focused || !visible.nodes.some((n) => n.id === focused)) return new Set<string>();
     const keep = connected(visible.edges, focused);
     return new Set(visible.nodes.filter((n) => !keep.has(n.id)).map((n) => n.id));
   }, [focused, visible]);
-  const byId = useMemo(() => new Map(tree.nodes.map((n) => [n.id, n])), [tree]);
 
   const open = (id: string) => { setSelected(id); setFocused(id); };
   const close = () => { setSelected(null); setFocused(null); };
@@ -105,7 +107,7 @@ function TreeView({ pr, tree, focus, onShowInReview }: { pr: PRRef; tree: CallTr
 
   const hasProbable = tree.edges.some((e) => e.kind === "probable");
   const hasBreakage = tree.edges.some((e) => e.notUpdated);
-  const node = selected ? byId.get(selected) : undefined;
+  const node = tree.nodes.find((n) => n.id === selected);
 
   return (
     <div className="flex items-start gap-6">

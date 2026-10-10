@@ -291,15 +291,16 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   const python = useMemo(() => hasPython(page.files), [page.files]);
   const logicAvailable = page.claude || python;
   const tab = logicAvailable && params.get("view") === "logic" ? "logic" : "review";
-  const wanted: LogicMode = params.get("mode") === "calls" ? "calls" : loadPref<LogicMode>(pr, "logicMode", page.claude ? "flow" : "calls");
-  // Flow needs Claude and Calls needs Python: fall back to the one that works.
-  const logicMode: LogicMode = !python ? "flow" : !page.claude ? "calls" : wanted;
+  // The link's ?mode= first, then the last one chosen; Flow when Claude can draw it.
+  const param = params.get("mode");
+  const wanted: LogicMode = param === "flow" || param === "calls" ? param : loadPref<LogicMode>(pr, "logicMode", page.claude ? "flow" : "calls");
+  // Calls needs Python; without Claude, Flow still explains what it needs.
+  const logicMode: LogicMode = python ? wanted : "flow";
   const setLogicMode = (mode: LogicMode) => {
     savePref(pr, "logicMode", mode);
     setParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (mode === "calls") next.set("mode", "calls");
-      else next.delete("mode");
+      next.set("mode", mode);
       return next;
     });
   };

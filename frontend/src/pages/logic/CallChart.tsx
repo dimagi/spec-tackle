@@ -1,12 +1,13 @@
 /** The call tree as a React Flow chart, laid out by ELK. Loaded lazily with the Calls view. */
 import {
-  applyNodeChanges, Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow,
+  applyNodeChanges, Background, Controls, MarkerType, ReactFlow, ReactFlowProvider, useReactFlow,
   type Edge, type NodeChange, type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CallEdge, CallNode } from "../../api/types";
 import { callName, isRoot, layoutCalls, type CallFlowNode } from "../../lib/callTree";
+import { FIT, FitOnResize, Handles, TONE, useDarkMode } from "./chartParts";
 
 type Props = {
   nodes: CallNode[];
@@ -21,11 +22,6 @@ type Props = {
   onFailed: () => void;
 };
 
-const TONE = {
-  added: "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60",
-  changed: "border-amber-500 bg-amber-50 dark:bg-amber-950/50",
-  unchanged: "border-stone-300 bg-white dark:border-stone-600 dark:bg-stone-900",
-};
 
 // Route, task, command and signal handlers: called by a framework, so they have no callers here.
 const ENTRY = /\.(get|post|put|patch|delete|route|task|command)\b|^(receiver|shared_task|task)\b/;
@@ -60,8 +56,7 @@ function Card({ data }: NodeProps<CallFlowNode>) {
       onClick={() => onActivate(n.id)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(n.id); } }}
       className={`logic-card nopan h-full rounded-xl px-3 py-2 shadow-sm ${isRoot(n) ? "border-[3px]" : "border-2"} ${TONE[n.change]} ${selected === n.id ? "is-selected" : ""} ${faded.has(n.id) ? "faded" : ""}`}>
-      <Handle type="target" position={Position.Top} isConnectable={false} className="!border-0 !bg-transparent" />
-      <Handle type="source" position={Position.Bottom} isConnectable={false} className="!border-0 !bg-transparent" />
+      <Handles />
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-500">
         {n.kind}
         <span className="ml-auto flex gap-1 normal-case tracking-normal">
@@ -77,7 +72,6 @@ function Card({ data }: NodeProps<CallFlowNode>) {
 }
 
 const nodeTypes = { call: Card };
-const FIT = { duration: 300, padding: 0.12 };
 const AMBER = "#d97706";
 
 function edgeStyle(e: CallEdge, dim: boolean): Partial<Edge> {
@@ -141,16 +135,6 @@ function Flow({ nodes, edges, hiddenTests, faded, onBackground, onFailed }: Pick
   );
 }
 
-function useDarkMode() {
-  const read = () => document.documentElement.classList.contains("dark");
-  const [dark, setDark] = useState(read);
-  useEffect(() => {
-    const update = () => setDark(read());
-    window.addEventListener("spec-tackle:theme", update);
-    return () => window.removeEventListener("spec-tackle:theme", update);
-  }, []);
-  return dark;
-}
 
 export default function CallChart({ nodes, edges, hiddenTests, selected, faded, onActivate, onBackground, onFailed }: Props) {
   const counts = useMemo(() => {
@@ -174,16 +158,3 @@ export default function CallChart({ nodes, edges, hiddenTests, selected, faded, 
   );
 }
 
-/** Re-fit when the chart's box changes width, e.g. when the panel opens beside it. */
-function FitOnResize() {
-  const { fitView } = useReactFlow();
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    const box = ref.current?.closest(".logic-flow");
-    if (!box) return;
-    const observer = new ResizeObserver(() => fitView(FIT));
-    observer.observe(box);
-    return () => observer.disconnect();
-  }, [fitView]);
-  return <span ref={ref} hidden />;
-}

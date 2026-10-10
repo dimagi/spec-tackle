@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import type { CallTree, LogicBlock, LogicFunctions, LogicMap, LogicState } from "../../api/types";
 import { layoutFlow } from "../../lib/logicFlow";
 import { loadPref } from "../../state/storage";
@@ -73,10 +74,17 @@ function serve() {
   }));
 }
 
+/** The page's side of a controlled LogicView: it keeps the mode and reports each change. */
+function Controlled({ onMode, ...props }: React.ComponentProps<typeof LogicView>) {
+  const [mode, setMode] = useState(props.mode ?? "flow");
+  return <LogicView {...props} mode={mode} onMode={(m) => { setMode(m); onMode?.(m); }} />;
+}
+
 function setup(onShowInReview = vi.fn(), props: Partial<React.ComponentProps<typeof LogicView>> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const View = props.onMode ? Controlled : LogicView;
   const view = render(
-    <QueryClientProvider client={client}><LogicView pr={PR} head={HEAD} onShowInReview={onShowInReview} {...props} /></QueryClientProvider>,
+    <QueryClientProvider client={client}><View pr={PR} head={HEAD} onShowInReview={onShowInReview} {...props} /></QueryClientProvider>,
   );
   return { ...view, onShowInReview };
 }
@@ -361,9 +369,10 @@ test("a function in Flow's panel links to the call tree, which opens on that nod
   setup(vi.fn(), { python: true, onMode });
   await userEvent.click(await node(/Save and sync ⊕/));
   const panel = await screen.findByRole("complementary", { name: "Save and sync" });
-  // save is in the call tree; push (lib/queue.py) isn't.
+  // Every function in a Python file links there; the Calls view finds it from its place.
   const links = await within(panel).findAllByRole("button", { name: "Calls" });
-  expect(links).toHaveLength(1);
+  expect(links).toHaveLength(2);
+  expect(calls.some((c) => c.includes("/calls"))).toBe(false); // nothing is analysed until asked
 
   await userEvent.click(links[0]);
   expect(onMode).toHaveBeenLastCalledWith("calls");

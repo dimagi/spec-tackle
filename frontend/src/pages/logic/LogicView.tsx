@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { apiBase, logicKey, useLogic } from "../../api/queries";
 import { request } from "../../api/request";
 import type { LogicBlock, LogicMap, LogicState } from "../../api/types";
 import { allParentIds, withoutTests } from "../../lib/logicFlow";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
-import { CallsView } from "./CallsView";
+import { CallsView, type CallFocus } from "./CallsView";
 import { FunctionPanel } from "./FunctionPanel";
 
 // React Flow and ELK load only when a map is shown.
@@ -28,14 +28,15 @@ type Props = {
 
 /** The Logic tab: a Flow of the PR's behaviour (Claude), or the Calls of its changed Python code. */
 export function LogicView({ pr, head, onShowInReview, claude = true, python = false, mode: given = "flow", onMode }: Props) {
-  const [mode, setModeState] = useState<LogicMode>(given);
-  useEffect(() => setModeState(given), [given]);
+  // Controlled by the page when it passes onMode; on its own otherwise (as in tests).
+  const [own, setOwn] = useState<LogicMode>(given);
+  const mode = onMode ? given : own;
   // Each mode stays mounted once shown, so it keeps its state across switches.
-  const [visited, setVisited] = useState(() => new Set<LogicMode>([given]));
-  useEffect(() => setVisited((v) => (v.has(mode) ? v : new Set([...v, mode]))), [mode]);
-  const [focus, setFocus] = useState<{ id: string } | null>(null);
+  const visited = useRef(new Set<LogicMode>()).current;
+  visited.add(mode);
+  const [focus, setFocus] = useState<CallFocus | null>(null);
   const setMode = (next: LogicMode) => {
-    setModeState(next);
+    setOwn(next);
     onMode?.(next);
   };
 
@@ -57,8 +58,8 @@ export function LogicView({ pr, head, onShowInReview, claude = true, python = fa
       {visited.has("flow") && (
         <div hidden={mode !== "flow"}>
           {claude ? (
-            <FlowView pr={pr} head={head} onShowInReview={onShowInReview} python={python}
-              onShowCalls={(id) => { setFocus({ id }); setMode("calls"); }} />
+            <FlowView pr={pr} head={head} onShowInReview={onShowInReview}
+              onShowCalls={python ? (path, line) => { setFocus({ path, line }); setMode("calls"); } : undefined} />
           ) : (
             <p className="mx-auto max-w-xl py-16 text-center text-sm text-stone-600 dark:text-stone-400">
               The flowchart needs Claude Code. The call tree works without it.
@@ -79,12 +80,11 @@ type Run = { head: string; progress: string };
 
 /** Flow: generate a map of the PR's behaviour, then explore it. */
 type FlowProps = Pick<Props, "pr" | "head" | "onShowInReview"> & {
-  python: boolean;
-  /** Open a function in the call tree. */
-  onShowCalls: (nodeId: string) => void;
+  /** Open a function in the call tree; absent when there's no call tree. */
+  onShowCalls?: (path: string, line: number) => void;
 };
 
-function FlowView({ pr, head: pageHead, onShowInReview, python, onShowCalls }: FlowProps) {
+function FlowView({ pr, head: pageHead, onShowInReview, onShowCalls }: FlowProps) {
   // A run is for the PR's real head, which can be newer than the page's; follow that one.
   const [head, setHead] = useState(pageHead);
   useEffect(() => setHead(pageHead), [pageHead]);
@@ -171,7 +171,7 @@ function FlowView({ pr, head: pageHead, onShowInReview, python, onShowCalls }: F
         </Card>
       )}
       {map ? (
-        <MapView key={map.id} pr={pr} map={map} onShowInReview={onShowInReview} python={python} onShowCalls={onShowCalls} />
+        <MapView key={map.id} pr={pr} map={map} onShowInReview={onShowInReview} onShowCalls={onShowCalls} />
       ) : !run && !failure && (
         <div className="mx-auto max-w-xl py-16 text-center">
           <h2 className="font-serif text-2xl font-semibold">See what this PR does</h2>
@@ -201,8 +201,8 @@ function Card({ children, tone = "info" }: { children: React.ReactNode; tone?: "
 
 // -- the map ------------------------------------------------------------------
 
-function MapView({ pr, map, onShowInReview, python, onShowCalls }: {
-  pr: PRRef; map: LogicMap; onShowInReview: Props["onShowInReview"]; python: boolean; onShowCalls: FlowProps["onShowCalls"];
+function MapView({ pr, map, onShowInReview, onShowCalls }: {
+  pr: PRRef; map: LogicMap; onShowInReview: Props["onShowInReview"]; onShowCalls: FlowProps["onShowCalls"];
 }) {
   const parents = useMemo(() => new Set(allParentIds(map.blocks)), [map.blocks]);
   const [expanded, setExpanded] = useState(
@@ -273,7 +273,7 @@ function MapView({ pr, map, onShowInReview, python, onShowCalls }: {
       </div>
       {selected && (
         <FunctionPanel pr={pr} mapId={map.id} block={selected} headSha={map.headSha}
-          onClose={() => setSelected(null)} onShowInReview={onShowInReview} python={python} onShowCalls={onShowCalls} />
+          onClose={() => setSelected(null)} onShowInReview={onShowInReview} onShowCalls={onShowCalls} />
       )}
     </div>
   );

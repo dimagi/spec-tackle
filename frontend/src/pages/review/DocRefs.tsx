@@ -7,6 +7,7 @@ import { request } from "../../api/request";
 import type { DocRef, DocRefsState } from "../../api/types";
 import { elementsInRange } from "../../lib/anchors";
 import { clearRefs, markRefs, targetCopy } from "../../lib/docRefs";
+import { githubBlobUrl } from "../../lib/links";
 import { scrollToLine } from "../../lib/scrollToLine";
 import type { PRRef } from "../../state/storage";
 import { toast } from "../../state/toasts";
@@ -289,7 +290,7 @@ function goTo({ pr, head, path, ref, show }: {
 }
 
 function githubLines(pr: PRRef, head: string, path: string, ref: DocRef): string {
-  return `https://github.com/${pr.owner}/${pr.repo}/blob/${head}/${encodeURI(path)}#L${ref.targetStart}-L${ref.targetEnd}`;
+  return githubBlobUrl(pr, head, path, ref.targetStart, ref.targetEnd);
 }
 
 /** What a reference points at, next to the phrase. */

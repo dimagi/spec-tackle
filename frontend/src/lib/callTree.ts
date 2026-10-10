@@ -25,24 +25,19 @@ export function visibleTree(tree: CallTree, f: CallFilters): { nodes: CallNode[]
     roots = roots.filter((n) => n.signatureChanged);
     edges = edges.filter((e) => e.notUpdated);
   }
-  const keep = new Set(roots.map((n) => n.id));
-  const walk = (hops: number, next: (id: string) => string[]) => {
-    let frontier = roots.map((n) => n.id);
-    for (let i = 0; i < hops && frontier.length; i++) {
-      frontier = frontier.flatMap(next).filter((id) => !keep.has(id));
-      frontier.forEach((id) => keep.add(id));
-    }
-  };
-  walk(f.up, (id) => edges.filter((e) => e.to === id).map((e) => e.from));
-  walk(f.breakage ? 0 : f.down, (id) => edges.filter((e) => e.from === id).map((e) => e.to));
+  const ids = roots.map((n) => n.id);
+  const { callers, callees } = adjacency(edges);
+  const keep = new Set([...reach(ids, callers, f.up), ...reach(ids, callees, f.breakage ? 0 : f.down)]);
 
   const hiddenTests = new Map<string, number>();
   if (!f.tests) {
-    const callers = new Map<string, Set<string>>();
+    const testCallers = new Map<string, Set<string>>();
     for (const e of tree.edges) {
-      if (byId.get(e.from)?.test && keep.has(e.to)) callers.set(e.to, new Set([...(callers.get(e.to) ?? []), e.from]));
+      if (!byId.get(e.from)?.test || !keep.has(e.to)) continue;
+      if (!testCallers.has(e.to)) testCallers.set(e.to, new Set());
+      testCallers.get(e.to)!.add(e.from);
     }
-    callers.forEach((s, id) => hiddenTests.set(id, s.size));
+    testCallers.forEach((s, id) => hiddenTests.set(id, s.size));
   }
   return {
     nodes: tree.nodes.filter((n) => keep.has(n.id)),
@@ -51,21 +46,35 @@ export function visibleTree(tree: CallTree, f: CallFilters): { nodes: CallNode[]
   };
 }
 
+/** Who calls each node, and what each node calls. */
+function adjacency(edges: CallEdge[]) {
+  const callers = new Map<string, string[]>();
+  const callees = new Map<string, string[]>();
+  const add = (map: Map<string, string[]>, key: string, value: string) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(value);
+  };
+  for (const e of edges) {
+    add(callers, e.to, e.from);
+    add(callees, e.from, e.to);
+  }
+  return { callers, callees };
+}
+
+/** Every node reachable from `starts` within `hops` steps of `next`, the starts included. */
+function reach(starts: string[], next: Map<string, string[]>, hops = Infinity): Set<string> {
+  const seen = new Set(starts);
+  let frontier = starts;
+  for (let i = 0; i < hops && frontier.length; i++) {
+    frontier = frontier.flatMap((id) => next.get(id) ?? []).filter((id) => !seen.has(id) && (seen.add(id), true));
+  }
+  return seen;
+}
+
 /** A node, everything that leads to it, and everything it leads to. */
 export function connected(edges: CallEdge[], id: string): Set<string> {
-  const found = new Set([id]);
-  const follow = (start: string, next: (id: string) => string[]) => {
-    const seen = new Set([start]);
-    const queue = [start];
-    while (queue.length) {
-      for (const n of next(queue.shift()!)) {
-        if (!seen.has(n)) { seen.add(n); found.add(n); queue.push(n); }
-      }
-    }
-  };
-  follow(id, (n) => edges.filter((e) => e.to === n).map((e) => e.from));
-  follow(id, (n) => edges.filter((e) => e.from === n).map((e) => e.to));
-  return found;
+  const { callers, callees } = adjacency(edges);
+  return new Set([...reach([id], callers), ...reach([id], callees)]);
 }
 
 /** What a card shows as its name: functions and methods with (), classes without. */

@@ -81,7 +81,7 @@ test("the Logic mode is kept in ?mode=calls, so a reload comes back to it", asyn
   const router = renderReview(makePage({ claude: true, files }), "/pr/o/r/7?view=logic&mode=calls");
   expect(await screen.findByRole("tab", { name: "Calls" })).toHaveAttribute("aria-selected", "true");
   await userEvent.click(screen.getByRole("tab", { name: "Flow" }));
-  expect(router.state.location.search).toBe("?view=logic");
+  expect(router.state.location.search).toBe("?view=logic&mode=flow");
   await userEvent.click(screen.getByRole("tab", { name: "Calls" }));
   expect(router.state.location.search).toBe("?view=logic&mode=calls");
 });

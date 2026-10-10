@@ -1,8 +1,8 @@
 import { useCallSource } from "../../api/queries";
 import type { CallNode, CallTree } from "../../api/types";
-import { Html } from "../../components/Html";
 import { callName } from "../../lib/callTree";
 import type { PRRef } from "../../state/storage";
+import { SourceLines, SourceLink } from "./Source";
 
 type Props = {
   pr: PRRef;
@@ -50,16 +50,9 @@ export function CallPanel({ pr, head, node, tree, onClose, onOpen, onShowInRevie
           <div className="mb-1.5 flex items-baseline">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-stone-500">Source</h3>
             <span className="ml-auto">
-              {source.data?.inDiff ? (
-                <button type="button" className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300"
-                  onClick={() => onShowInReview(node.path, firstChange ?? node.start)}>
-                  Show in Code view
-                </button>
-              ) : source.data && (
-                <a className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300" target="_blank" rel="noopener"
-                  href={`https://github.com/${pr.owner}/${pr.repo}/blob/${head}/${node.path}#L${node.start}-L${node.end}`}>
-                  View on GitHub
-                </a>
+              {source.data && (
+                <SourceLink pr={pr} head={head} path={node.path} start={node.start} end={node.end} inDiff={source.data.inDiff}
+                  line={firstChange ?? node.start} onShowInReview={onShowInReview} />
               )}
             </span>
           </div>
@@ -67,14 +60,7 @@ export function CallPanel({ pr, head, node, tree, onClose, onOpen, onShowInRevie
           {source.error && <p className="text-sm text-red-700 dark:text-red-300">Couldn't load the code: {(source.error as Error).message}</p>}
           {source.data?.missing && <p className="text-sm text-stone-500">{source.data.missing}</p>}
           {source.data && !source.data.missing && (
-            <pre className="logic-code">
-              {source.data.lines.map((l) => (
-                <div key={l.n} className={`logic-line${l.changed ? " changed" : ""}`}>
-                  <span className="ln">{l.n}</span>
-                  <Html as="code" html={l.html} />
-                </div>
-              ))}
-            </pre>
+            <SourceLines lines={source.data.lines} />
           )}
         </section>
       </div>
