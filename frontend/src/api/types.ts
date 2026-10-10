@@ -144,6 +144,30 @@ export type LogicFunction = FunctionRef & {
   missing?: string;
 };
 
+/** One function, method or class in the call tree. `up`/`down` are hops from the nearest changed one. */
+export type CallNode = {
+  id: string; path: string; symbol: string; start: number; end: number;
+  kind: "function" | "method" | "class";
+  change: LogicChange;
+  signatureChanged: boolean;
+  decorators: string[];
+  test: boolean;
+  up: number | null; down: number | null;
+};
+
+export type CallEdge = { from: string; to: string; kind: "call" | "ref" | "probable"; lines: number[]; notUpdated: boolean };
+
+export type CallTree = {
+  headSha: string;
+  nodes: CallNode[];
+  edges: CallEdge[];
+  other: { path: string; reason: "not Python" | "module level" | "syntax error" | "too large" }[];
+  truncated: null | "files" | "nodes";
+  depth: { up: number; down: number };
+};
+
+export type CallSource = Omit<LogicFunction, "step">;
+
 export type LogicFunctions = { label: string; headSha: string; functions: LogicFunction[] };
 
 /** A phrase in a document that points at other lines: of the same file when `targetPath` is null. */

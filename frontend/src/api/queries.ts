@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 import type { PRRef } from "../state/storage";
 import { request } from "./request";
-import type { Activity, ClaudeThread, DocRefsState, RefTarget, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
+import type { Activity, CallSource, CallTree, ClaudeThread, DocRefsState, RefTarget, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
 
 export const POLL_MS = 30_000;
 
@@ -112,6 +112,27 @@ export function useLogicFunctions(mapId: string, blockId: string) {
   return useQuery({
     queryKey: ["logic-functions", mapId, blockId],
     queryFn: () => request<LogicFunctions>("GET", `/api/logic/${encodeURIComponent(mapId)}/blocks/${encodeURIComponent(blockId)}/functions`),
+    staleTime: Infinity,
+  });
+}
+
+/** The static call tree of the PR's changed Python code at `head`. */
+export function useCallTree(pr: PRRef, head: string, enabled = true) {
+  return useQuery({
+    queryKey: ["calls", pr.owner, pr.repo, pr.number, head],
+    queryFn: () => request<CallTree>("GET", `${apiBase(pr)}/calls?head=${encodeURIComponent(head)}`),
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function useCallSource(pr: PRRef, head: string, nodeId: string) {
+  return useQuery({
+    queryKey: ["calls-source", pr.owner, pr.repo, pr.number, head, nodeId],
+    queryFn: () => request<CallSource>(
+      "GET", `${apiBase(pr)}/calls/source?head=${encodeURIComponent(head)}&node=${encodeURIComponent(nodeId)}`,
+    ),
     staleTime: Infinity,
   });
 }
