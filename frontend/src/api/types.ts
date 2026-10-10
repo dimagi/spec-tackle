@@ -161,3 +161,16 @@ export type DocRefs = {
 };
 /** GET/POST …/refs for one file. */
 export type DocRefsState = { available: boolean; refs: DocRefs | null; stale: boolean; running: boolean; error?: string | null };
+
+/** The Logic walkthrough: one traced run from an entry block (docs/specs/2026-10-10-logic-walkthrough-design.md). */
+export type WalkInput = { name: string; description: string; value: unknown };
+export type DangerKind = "destructive" | "external" | "unsafe" | "irreversible";
+export type Danger = { kind: DangerKind; note: string };
+export type WalkStep = { blockId: string; input: unknown; output: unknown; note: string; assumed?: string[]; danger?: Danger[] };
+export type WalkOutcome = { kind: "exit" | "error" | "stopped"; message: string };
+export type Trace = {
+  id: string; mapId: string; entryId: string; inputs: WalkInput[]; steps: WalkStep[];
+  outcome: WalkOutcome; proposed: boolean; usedAt: string;
+};
+/** GET/POST /api/logic/{map}/walkthrough. `starting` holds Claude's proposed inputs, which Reset restores. */
+export type WalkState = { trace: Trace | null; starting: WalkInput[] | null; running: boolean; error: string | null };

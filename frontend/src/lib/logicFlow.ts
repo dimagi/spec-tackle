@@ -45,7 +45,7 @@ export function toElkGraph(blocks: LogicBlock[], expanded: Set<string>, directio
   };
 }
 
-const edgeId = (from: string, to: string, i: number) => `${from}>${to}#${i}`;
+export const edgeId = (from: string, to: string, i: number) => `${from}>${to}#${i}`;
 
 /** Lay the tree out and return React Flow nodes (parents before children) and edges. */
 export async function layoutFlow(
@@ -115,12 +115,16 @@ export function isTestBlock(b: LogicBlock): boolean {
   return !!b.functions?.length && b.functions.every((f) => isTestPath(f.path));
 }
 
-/** The tree without test blocks (at any level) and without edges to them; `hidden` counts what was dropped. */
-export function withoutTests(blocks: LogicBlock[]): { blocks: LogicBlock[]; hidden: number } {
+/**
+ * The tree without test blocks (at any level) and without edges to them; `hidden` counts what was dropped.
+ * Blocks in `keep`, or holding one, stay: a walkthrough's path is drawn even when it runs through tests.
+ */
+export function withoutTests(blocks: LogicBlock[], keep: Set<string> = new Set()): { blocks: LogicBlock[]; hidden: number } {
   let hidden = 0;
+  const holds = (b: LogicBlock): boolean => keep.has(b.id) || (b.children ?? []).some(holds);
   const prune = (list: LogicBlock[]): LogicBlock[] => {
     const kept = list.filter((b) => {
-      if (!isTestBlock(b)) return true;
+      if (!isTestBlock(b) || holds(b)) return true;
       hidden += 1;
       return false;
     });

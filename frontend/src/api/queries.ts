@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 import type { PRRef } from "../state/storage";
 import { request } from "./request";
-import type { Activity, ClaudeThread, DocRefsState, RefTarget, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
+import type { Activity, ClaudeThread, DocRefsState, RefTarget, LogicFunctions, LogicState, Page, PrSummary, Repo, Session, WalkState } from "./types";
 
 export const POLL_MS = 30_000;
 
@@ -134,5 +134,16 @@ export function useRefTarget(refsId: string, index: number) {
     queryKey: ["ref-target", refsId, index],
     queryFn: () => request<RefTarget>("GET", `/api/refs/${encodeURIComponent(refsId)}/${index}/target`),
     staleTime: Infinity,
+  });
+}
+
+export const walkKey = (mapId: string, entry: string) => ["walk", mapId, entry];
+
+/** The walkthrough for one entry of a map: its latest trace, starting inputs and run state. */
+export function useWalkthrough(mapId: string, entry: string | null) {
+  return useQuery({
+    queryKey: walkKey(mapId, entry ?? ""),
+    queryFn: () => request<WalkState>("GET", `/api/logic/${encodeURIComponent(mapId)}/walkthrough?entry=${encodeURIComponent(entry!)}`),
+    enabled: !!entry,
   });
 }

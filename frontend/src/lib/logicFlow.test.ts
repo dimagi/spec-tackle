@@ -105,3 +105,14 @@ test("a block whose steps are all tests goes entirely", () => {
   const tree = [block("a"), block("p", { children: [block("x", { functions: [fn("tests/test_x.py")] })] })];
   expect(withoutTests(tree).blocks.map((b) => b.id)).toEqual(["a"]);
 });
+
+test("withoutTests keeps test blocks that are in the keep set", () => {
+  const blocks: LogicBlock[] = [
+    { id: "a", label: "A", kind: "entry", change: "added", next: [{ to: "t" }] },
+    { id: "t", label: "Test: it works", kind: "step", change: "added", next: [] },
+  ];
+  expect(withoutTests(blocks).blocks.map((x) => x.id)).toEqual(["a"]);
+  const kept = withoutTests(blocks, new Set(["t"]));
+  expect(kept.blocks.map((x) => x.id)).toEqual(["a", "t"]);
+  expect(kept.blocks[0].next).toEqual([{ to: "t" }]);
+});
