@@ -157,7 +157,7 @@ Reads the PR's files from GitHub for the changed lines, gets the worktree, and r
   }],
   edges: [{ from: str, to: str, kind: "call" | "ref" | "probable",
             lines: [int], notUpdated: bool }],
-  other: [{ path: str, reason: "not Python" | "module level" | "syntax error" }],
+  other: [{ path: str, reason: "not Python" | "module level" | "syntax error" | "too large" }],
   truncated: null | "files" | "nodes",
   depth: { up: int, down: int }   # the depths actually included
 }

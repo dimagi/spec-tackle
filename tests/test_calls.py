@@ -359,3 +359,242 @@ def test_nested_functions_are_callers_of_their_own(tmp_path):
         ("m.py::outer.<locals>.inner", "m.py::target", "call"),
         ("m.py::outer", "m.py::outer.<locals>.inner", "call"),
     }
+
+
+# -- roots, neighbourhood, analyse -------------------------------------------
+
+
+def patch(*hunks: str) -> str:
+    return "\n".join(dedent(h).strip("\n") for h in hunks)
+
+
+def test_changed_lines_reports_additions_and_where_lines_were_deleted():
+    added, deleted = calls.changed_lines(patch("""
+        @@ -1,4 +1,4 @@
+         a
+        -b
+        +B
+         c
+        @@ -10,3 +10,2 @@
+         x
+        -y
+         z
+    """))
+    assert added == {2}
+    assert deleted == {2, 11}
+    assert calls.changed_lines(None) == (set(), set())
+
+
+SOURCE = '''
+    def untouched():
+        return 1
+
+
+    def body_edit(x):
+        y = x
+        return y
+
+
+    @decorator
+    def header_edit(x, y):
+        return x
+
+
+    def deleted_from(x):
+        return x
+
+
+    class Visit:
+        kind = "home"
+
+        def save(self):
+            return 1
+
+
+    class Form(Base):
+        def submit(self):
+            return 2
+
+
+    def outer():
+        def inner():
+            return 3
+        return inner()
+'''
+
+
+def roots_for(tmp_path, added=(), deleted=(), new_file=False):
+    repo(tmp_path, {"m.py": SOURCE})
+    index = calls.build_index(tmp_path)
+    return calls.roots(index, {"m.py": (set(added), set(deleted))}, {"m.py"} if new_file else set())
+
+
+def test_a_body_edit_changes_a_function(tmp_path):
+    assert roots_for(tmp_path, added=[6]) == {"m.py::body_edit": {"change": "changed", "signatureChanged": False}}
+
+
+def test_a_header_or_decorator_edit_changes_the_signature(tmp_path):
+    for line in (10, 11):
+        assert roots_for(tmp_path, added=[line]) == {"m.py::header_edit": {"change": "changed", "signatureChanged": True}}
+
+
+def test_deleting_lines_inside_a_function_changes_it(tmp_path):
+    assert roots_for(tmp_path, deleted=[16]) == {"m.py::deleted_from": {"change": "changed", "signatureChanged": False}}
+
+
+def test_a_function_whose_lines_are_all_added_is_added(tmp_path):
+    # A new function has no old callers to break, so its signature isn't "changed".
+    assert roots_for(tmp_path, added=[5, 6, 7]) == {"m.py::body_edit": {"change": "added", "signatureChanged": False}}
+
+
+def test_a_function_rewritten_line_for_line_is_changed_not_added(tmp_path):
+    got = roots_for(tmp_path, added=[5, 6, 7], deleted=[5])
+    assert got == {"m.py::body_edit": {"change": "changed", "signatureChanged": True}}
+
+
+def test_a_method_edit_changes_the_method_not_the_class(tmp_path):
+    assert roots_for(tmp_path, added=[23]) == {"m.py::Visit.save": {"change": "changed", "signatureChanged": False}}
+
+
+def test_a_class_attribute_edit_changes_the_class(tmp_path):
+    assert roots_for(tmp_path, added=[20]) == {"m.py::Visit": {"change": "changed", "signatureChanged": False}}
+
+
+def test_a_base_class_edit_changes_the_class_signature(tmp_path):
+    assert roots_for(tmp_path, added=[26]) == {"m.py::Form": {"change": "changed", "signatureChanged": True}}
+
+
+def test_a_new_file_makes_every_definition_added(tmp_path):
+    got = roots_for(tmp_path, new_file=True)
+    assert got["m.py::Visit"]["change"] == "added" and got["m.py::Visit.save"]["change"] == "added"
+    assert got["m.py::untouched"]["change"] == "added"
+
+
+def test_a_nested_function_edit_changes_the_outer_function(tmp_path):
+    got = roots_for(tmp_path, added=[33])
+    assert got["m.py::outer"] == {"change": "changed", "signatureChanged": False}
+
+
+E = calls.Edge
+
+
+def test_neighbourhood_measures_hops_up_and_down():
+    edges = [E("a", "b", "call", (1,)), E("b", "root", "call", (1,)), E("root", "c", "call", (1,)), E("c", "d", "call", (1,))]
+    dist, depth, cut = calls.neighbourhood(edges, {"root"}, up=1, down=3)
+    assert dist == {"root": (0, 0), "b": (1, None), "c": (None, 1), "d": (None, 2)}
+    assert depth == (1, 3) and cut is False
+
+
+def test_neighbourhood_survives_recursion_and_cycles():
+    edges = [E("root", "root", "call", (1,)), E("root", "a", "call", (1,)), E("a", "root", "call", (1,))]
+    dist, _, _ = calls.neighbourhood(edges, {"root"})
+    assert dist == {"root": (0, 0), "a": (1, 1)}
+
+
+def test_neighbourhood_cuts_the_farthest_callees_first():
+    edges = [E("up1", "root", "call", (1,)), E("up2", "up1", "call", (1,)),
+             E("root", "dn1", "call", (1,)), E("dn1", "dn2", "call", (1,))]
+    dist, depth, cut = calls.neighbourhood(edges, {"root"}, max_nodes=4)
+    assert set(dist) == {"root", "up1", "up2", "dn1"}
+    assert depth == (2, 1) and cut is True
+
+
+def test_analyse_builds_the_tree_for_a_pr(tmp_path):
+    repo(tmp_path, {
+        "app/retry.py": '''
+            def backoff(tries, base):
+                return base * 2 ** tries
+
+
+            def resend(form):
+                return backoff(1, 2)
+        ''',
+        "app/forms.py": '''
+            from app.retry import backoff, resend
+
+
+            def send(form):
+                return backoff(3, 1)
+
+
+            def submit(form):
+                return resend(form)
+        ''',
+        "tests/test_retry.py": '''
+            from app.retry import backoff
+
+
+            def test_backoff():
+                assert backoff(1, 1) == 2
+        ''',
+        "docs/retry.md": "# Retry\n",
+    })
+    files = [
+        {"filename": "app/retry.py", "status": "modified",
+         "patch": "@@ -1,2 +1,2 @@\n-def backoff(tries):\n-    return 2 ** tries\n+def backoff(tries, base):\n+    return base * 2 ** tries\n"},
+        {"filename": "docs/retry.md", "status": "added", "patch": "@@ -0,0 +1 @@\n+# Retry"},
+        {"filename": "app/gone.py", "status": "removed", "patch": "@@ -1 +0,0 @@\n-x = 1"},
+    ]
+    tree = calls.analyse(tmp_path, files)
+    nodes = {n["id"]: n for n in tree["nodes"]}
+    assert set(nodes) == {
+        "app/retry.py::backoff", "app/retry.py::resend", "app/forms.py::send", "app/forms.py::submit",
+        "tests/test_retry.py::test_backoff",
+    }
+    backoff = nodes["app/retry.py::backoff"]
+    assert backoff == {
+        "id": "app/retry.py::backoff", "path": "app/retry.py", "symbol": "backoff", "start": 1, "end": 2,
+        "kind": "function", "change": "changed", "signatureChanged": True, "decorators": [], "test": False,
+        "up": 0, "down": 0,
+    }
+    assert nodes["app/forms.py::submit"]["up"] == 2 and nodes["app/forms.py::submit"]["down"] is None
+    assert nodes["tests/test_retry.py::test_backoff"]["test"] is True
+
+    edges = {(e["from"], e["to"]): e for e in tree["edges"]}
+    assert edges[("app/forms.py::send", "app/retry.py::backoff")]["notUpdated"] is True
+    assert edges[("app/forms.py::send", "app/retry.py::backoff")]["lines"] == [5]
+    assert edges[("app/forms.py::submit", "app/retry.py::resend")]["notUpdated"] is False
+    assert tree["other"] == [{"path": "docs/retry.md", "reason": "not Python"}]
+    assert tree["truncated"] is None and tree["depth"] == {"up": 3, "down": 3}
+
+
+def test_a_changed_caller_of_a_changed_signature_is_updated(tmp_path):
+    repo(tmp_path, {"m.py": "def a(x, y):\n    pass\n\ndef b():\n    a(1, 2)\n"})
+    files = [{"filename": "m.py", "status": "modified", "patch": "@@ -1,5 +1,5 @@\n-def a(x):\n+def a(x, y):\n     pass\n \n def b():\n-    a(1)\n+    a(1, 2)"}]
+    [edge] = calls.analyse(tmp_path, files)["edges"]
+    assert edge["notUpdated"] is False
+
+
+def test_nested_functions_fold_into_their_parent(tmp_path):
+    repo(tmp_path, {"m.py": "def target():\n    pass\n\ndef outer():\n    def inner():\n        target()\n    return inner()\n"})
+    files = [{"filename": "m.py", "status": "modified", "patch": "@@ -6,1 +6,1 @@\n-        pass\n+        target()"}]
+    tree = calls.analyse(tmp_path, files)
+    assert {n["id"] for n in tree["nodes"]} == {"m.py::outer", "m.py::target"}
+    assert [(e["from"], e["to"]) for e in tree["edges"]] == [("m.py::outer", "m.py::target")]
+
+
+def test_module_level_changes_and_broken_files_are_listed_as_other(tmp_path):
+    repo(tmp_path, {"m.py": "X = 1\n\ndef f():\n    pass\n", "broken.py": "def (:\n"})
+    files = [
+        {"filename": "m.py", "status": "modified", "patch": "@@ -1 +1 @@\n-X = 0\n+X = 1"},
+        {"filename": "broken.py", "status": "added", "patch": "@@ -0,0 +1 @@\n+def (:"},
+    ]
+    tree = calls.analyse(tmp_path, files)
+    assert tree["nodes"] == [] and tree["edges"] == []
+    assert sorted(tree["other"], key=lambda o: o["path"]) == [
+        {"path": "broken.py", "reason": "syntax error"},
+        {"path": "m.py", "reason": "module level"},
+    ]
+
+
+def test_a_pr_without_python_changes_has_no_nodes(tmp_path):
+    repo(tmp_path, {"m.py": "def f():\n    pass\n"})
+    tree = calls.analyse(tmp_path, [{"filename": "a.md", "status": "added", "patch": "@@ -0,0 +1 @@\n+x"}])
+    assert tree["nodes"] == [] and tree["other"] == [{"path": "a.md", "reason": "not Python"}]
+
+
+def test_a_file_too_large_to_analyse_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr(calls, "MAX_BYTES", 10)
+    repo(tmp_path, {"big.py": "def f():\n    return 1\n"})
+    tree = calls.analyse(tmp_path, [{"filename": "big.py", "status": "added", "patch": "@@ -0,0 +1 @@\n+def f():"}])
+    assert tree["other"] == [{"path": "big.py", "reason": "too large"}]

@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import ast
 import os
+import re
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
 MAX_FILES = 5000
 MAX_BYTES = 1_000_000
+MAX_HOPS = 3
+MAX_NODES = 400
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "build", "dist", "site-packages"}
 
 _DEF = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -93,7 +97,9 @@ def module_name(path: str) -> str:
     return ".".join(parts)
 
 
-def build_index(root: Path, max_files: int = MAX_FILES, max_bytes: int = MAX_BYTES) -> Index:
+def build_index(root: Path, max_files: int | None = None, max_bytes: int | None = None) -> Index:
+    max_files = MAX_FILES if max_files is None else max_files
+    max_bytes = MAX_BYTES if max_bytes is None else max_bytes
     index = Index()
     for path in _python_files(Path(root)):
         if len(index.modules) >= max_files:
@@ -366,3 +372,186 @@ def _dotted(expr: ast.Attribute) -> list[str] | None:
     if not isinstance(expr, ast.Name):
         return None
     return [expr.id, *reversed(parts)]
+
+
+# -- what the PR changed -----------------------------------------------------
+
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+# The same rule as the Logic view's isTestPath (frontend/src/lib/logicFlow.ts).
+_TEST_PATHS = [
+    re.compile(r"(^|/)(tests?|__tests__|e2e)/"),
+    re.compile(r"(^|/)test_[^/]+\.py$"),
+    re.compile(r"_test\.(py|go|rb)$"),
+    re.compile(r"(^|/)conftest\.py$"),
+]
+
+
+def is_test_path(path: str) -> bool:
+    return any(p.search(path) for p in _TEST_PATHS)
+
+
+def changed_lines(patch: str | None) -> tuple[set[int], set[int]]:
+    """(lines the patch adds, new-side lines that deleted lines sat just before)."""
+    added: set[int] = set()
+    deleted: set[int] = set()
+    line = 0
+    for row in (patch or "").splitlines():
+        hunk = _HUNK.match(row)
+        if hunk:
+            line = int(hunk.group(1))
+        elif row.startswith("+"):
+            added.add(line)
+            line += 1
+        elif row.startswith("-"):
+            deleted.add(line)
+        elif row.startswith(" "):
+            line += 1
+    return added, deleted
+
+
+def _own_lines(index: Index, d: Definition) -> set[int]:
+    """A definition's lines; a class's leave out its methods and nested classes."""
+    lines = set(range(d.start, d.end + 1))
+    if d.kind == "class":
+        for child in index.modules[d.path].defs.values():
+            if child.parent == d.id:
+                lines -= set(range(child.start, child.end + 1))
+    return lines
+
+
+def roots(index: Index, changes: dict[str, tuple[set[int], set[int]]], added_files: set[str]) -> dict[str, dict]:
+    """The definitions the PR adds or changes: id -> {change, signatureChanged}."""
+    found: dict[str, dict] = {}
+    for path, (added, deleted) in changes.items():
+        module = index.modules.get(path)
+        if module is None:
+            continue
+        for d in module.defs.values():
+            span = set(range(d.start, d.end + 1))
+            if path in added_files or (span <= added and not span & deleted):
+                found[d.id] = {"change": "added", "signatureChanged": False}
+                continue
+            touched = _own_lines(index, d) & (added | deleted)
+            if touched:
+                header = set(range(d.header[0], d.header[1] + 1))
+                found[d.id] = {"change": "changed", "signatureChanged": bool(touched & header)}
+    return found
+
+
+def neighbourhood(
+    edges: list[Edge], root_ids: set[str], up: int = MAX_HOPS, down: int = MAX_HOPS, max_nodes: int = MAX_NODES,
+) -> tuple[dict[str, tuple[int | None, int | None]], tuple[int, int], bool]:
+    """Hop distances from the roots: (callers above, callees below), with the farthest cut to fit `max_nodes`."""
+    callers: dict[str, set[str]] = {}
+    callees: dict[str, set[str]] = {}
+    for e in edges:
+        callers.setdefault(e.callee, set()).add(e.caller)
+        callees.setdefault(e.caller, set()).add(e.callee)
+    above = _hops(root_ids, callers, up)
+    below = _hops(root_ids, callees, down)
+
+    def pick(u: int, d: int) -> dict[str, tuple[int | None, int | None]]:
+        ids = {i for i, n in above.items() if n <= u} | {i for i, n in below.items() if n <= d}
+        return {i: (above.get(i) if above.get(i, u + 1) <= u else None, below.get(i) if below.get(i, d + 1) <= d else None)
+                for i in ids}
+
+    cut = False
+    picked = pick(up, down)
+    while len(picked) > max_nodes and (up or down):
+        cut = True
+        if down >= up:
+            down -= 1
+        else:
+            up -= 1
+        picked = pick(up, down)
+    for r in root_ids:
+        picked[r] = (0, 0)
+    return picked, (up, down), cut
+
+
+def _hops(start: set[str], graph: dict[str, set[str]], limit: int) -> dict[str, int]:
+    dist = {s: 0 for s in start}
+    queue = deque(start)
+    while queue:
+        current = queue.popleft()
+        if dist[current] >= limit:
+            continue
+        for nxt in graph.get(current, ()):
+            if nxt not in dist:
+                dist[nxt] = dist[current] + 1
+                queue.append(nxt)
+    return dist
+
+
+def analyse(root: Path, files: list[dict]) -> dict:
+    """The call tree for a PR: its changed definitions, their callers and callees, and what wasn't analysed."""
+    index = build_index(root)
+    changes = {f["filename"]: changed_lines(f.get("patch")) for f in files
+               if f["status"] != "removed" and f["filename"].endswith(".py")}
+    added_files = {f["filename"] for f in files if f["status"] == "added"}
+    changed = roots(index, changes, added_files)
+
+    owner = {d.id: _owner(index, d).id for d in index.defs.values()}
+    root_ids = {i for i in changed if owner[i] == i}
+    merged: dict[tuple[str, str], tuple[str, set[int]]] = {}
+    for e in resolve_edges(index):
+        a, b = owner[e.caller], owner[e.callee]
+        if a == b and e.caller != e.callee:
+            continue  # a parent calling its own nested function
+        kind, lines = merged.get((a, b), (e.kind, set()))
+        merged[(a, b)] = (min(kind, e.kind, key=_RANK.__getitem__), lines | set(e.lines))
+    edges = [Edge(a, b, kind, tuple(sorted(lines))) for (a, b), (kind, lines) in merged.items()]
+
+    dist, (up, down), cut = neighbourhood(edges, root_ids)
+    nodes = []
+    for i, (u, d) in dist.items():
+        definition = index.defs[i]
+        info = changed.get(i, {"change": "unchanged", "signatureChanged": False})
+        nodes.append({
+            "id": i, "path": definition.path, "symbol": definition.qualname,
+            "start": definition.start, "end": definition.end, "kind": definition.kind,
+            "change": info["change"], "signatureChanged": info["signatureChanged"],
+            "decorators": list(definition.decorators), "test": is_test_path(definition.path),
+            "up": u, "down": d,
+        })
+    nodes.sort(key=lambda n: (n["path"], n["start"]))
+    return {
+        "nodes": nodes,
+        "edges": [
+            {"from": e.caller, "to": e.callee, "kind": e.kind, "lines": list(e.lines),
+             "notUpdated": e.caller not in root_ids and changed.get(e.callee, {}).get("signatureChanged", False)}
+            for e in edges if e.caller in dist and e.callee in dist
+        ],
+        "other": _other(index, files, changes),
+        "truncated": "nodes" if cut else "files" if index.truncated else None,
+        "depth": {"up": up, "down": down},
+    }
+
+
+def _owner(index: Index, d: Definition) -> Definition:
+    """What a definition is shown as: nested functions (and classes inside functions) fold into the outermost function."""
+    chain = [d]
+    while chain[-1].parent:
+        chain.append(index.defs[chain[-1].parent])
+    functions = [c for c in chain if c.kind != "class"]
+    return functions[-1] if functions else d
+
+
+def _other(index: Index, files: list[dict], changes: dict[str, tuple[set[int], set[int]]]) -> list[dict]:
+    skipped = {s["path"]: "too large" if s["reason"] == "too large" else "syntax error" for s in index.skipped}
+    other = []
+    for f in files:
+        path = f["filename"]
+        if f["status"] == "removed":
+            continue
+        if not path.endswith(".py"):
+            other.append({"path": path, "reason": "not Python"})
+        elif path in skipped:
+            other.append({"path": path, "reason": skipped[path]})
+        elif path in index.modules:
+            added, deleted = changes[path]
+            inside = set().union(*(range(d.start, d.end + 1) for d in index.modules[path].defs.values()))
+            if (added | deleted) - inside:
+                other.append({"path": path, "reason": "module level"})
+    return other
