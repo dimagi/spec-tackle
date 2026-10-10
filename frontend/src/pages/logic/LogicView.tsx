@@ -4,8 +4,13 @@ import { apiBase, logicKey, useLogic } from "../../api/queries";
 import { request } from "../../api/request";
 import type { LogicBlock, LogicMap, LogicState } from "../../api/types";
 import { allParentIds, withoutTests } from "../../lib/logicFlow";
+import {
+  containing, entries, pathBlocks, stepForBlock, takenEdges, walkMarks, type Walk,
+} from "../../lib/walkthrough";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
 import { FunctionPanel } from "./FunctionPanel";
+import { useWalk } from "./useWalk";
+import { WalkthroughPanel } from "./WalkthroughPanel";
 
 // React Flow and ELK load only when a map is shown.
 const FlowChart = lazy(() => import("./FlowChart"));
@@ -14,13 +19,16 @@ type Props = {
   pr: PRRef;
   /** The head commit of the page being reviewed. */
   head: string;
+  /** The walkthrough's entry block id (`?walk=`), or null when its panel is closed. */
+  walk: string | null;
+  onWalk: (entry: string | null) => void;
   onShowInReview: (path: string, line: number) => void;
 };
 
 type Run = { head: string; progress: string };
 
 /** The Logic tab: generate a map of the PR's behaviour, then explore it. */
-export function LogicView({ pr, head: pageHead, onShowInReview }: Props) {
+export function LogicView({ pr, head: pageHead, walk, onWalk, onShowInReview }: Props) {
   // A run is for the PR's real head, which can be newer than the page's; follow that one.
   const [head, setHead] = useState(pageHead);
   useEffect(() => setHead(pageHead), [pageHead]);
@@ -107,7 +115,7 @@ export function LogicView({ pr, head: pageHead, onShowInReview }: Props) {
         </Card>
       )}
       {map ? (
-        <MapView key={map.id} pr={pr} map={map} onShowInReview={onShowInReview} />
+        <MapView key={map.id} pr={pr} map={map} walk={walk} onWalk={onWalk} onShowInReview={onShowInReview} />
       ) : !run && !failure && (
         <div className="mx-auto max-w-xl py-16 text-center">
           <h2 className="font-serif text-2xl font-semibold">See what this PR does</h2>
@@ -137,7 +145,9 @@ function Card({ children, tone = "info" }: { children: React.ReactNode; tone?: "
 
 // -- the map ------------------------------------------------------------------
 
-function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShowInReview: Props["onShowInReview"] }) {
+function MapView({ pr, map, walk, onWalk, onShowInReview }: {
+  pr: PRRef; map: LogicMap; walk: Props["walk"]; onWalk: Props["onWalk"]; onShowInReview: Props["onShowInReview"];
+}) {
   const parents = useMemo(() => new Set(allParentIds(map.blocks)), [map.blocks]);
   const [expanded, setExpanded] = useState(
     () => new Set(loadPref<string[]>(pr, "logicExpanded", []).filter((id) => parents.has(id))),
@@ -145,7 +155,27 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
   const [selected, setSelected] = useState<LogicBlock | null>(null);
   // Test blocks describe the PR's tests, not its behaviour: hidden unless asked for.
   const [showTests, setShowTests] = useState(() => loadPref(pr, "logicShowTests", false));
-  const pruned = useMemo(() => withoutTests(map.blocks), [map.blocks]);
+
+  // -- the walkthrough ----------------------------------------------------------
+  const entryList = useMemo(() => entries(showTests ? map.blocks : withoutTests(map.blocks).blocks), [map.blocks, showTests]);
+  // An entry that's no longer in the map (regenerated, or a hidden test) falls back to the first.
+  const entry = walk === null ? null : entryList.some((e) => e.id === walk) ? walk : entryList[0]?.id ?? null;
+  const walkRun = useWalk(map.id, entry);
+  const trace = entry ? walkRun.data?.trace ?? null : null;
+  const [step, setStep] = useState(0);
+  const [reached, setReached] = useState(0);
+  useEffect(() => { setStep(0); setReached(0); }, [trace?.id]);
+  const goTo = (n: number) => { setStep(n); setReached((r) => Math.max(r, n)); };
+  const steps = useMemo(() => trace?.steps ?? [], [trace]);
+  const onPath = useMemo(() => pathBlocks(map.blocks, steps), [map.blocks, steps]);
+  const byId = useMemo(() => {
+    const m = new Map<string, LogicBlock>();
+    const add = (list: LogicBlock[]) => list.forEach((b) => { m.set(b.id, b); add(b.children ?? []); });
+    add(map.blocks);
+    return m;
+  }, [map.blocks]);
+
+  const pruned = useMemo(() => withoutTests(map.blocks, onPath), [map.blocks, onPath]);
   const blocks = showTests ? map.blocks : pruned.blocks;
   const toggleTests = () => {
     savePref(pr, "logicShowTests", !showTests);
@@ -153,6 +183,17 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
   };
   // ELK couldn't lay the map out: show it as a list instead.
   const [failed, setFailed] = useState(false);
+
+  // The path's blocks open while the walkthrough is up, without touching the saved choice.
+  const shownExpanded = useMemo(
+    () => (trace ? new Set([...expanded, ...containing(map.blocks, steps)]) : expanded),
+    [expanded, trace, map.blocks, steps],
+  );
+  const walkMarksFor: Walk | null = useMemo(() => trace && {
+    marks: walkMarks(blocks, steps, step),
+    taken: takenEdges(blocks, steps, step),
+    path: takenEdges(blocks, steps, steps.length - 1),
+  }, [trace, blocks, steps, step]);
 
   const setOpen = (next: Set<string>) => {
     setExpanded(next);
@@ -166,16 +207,22 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
       else next.add(block.id);
       setOpen(next);
     } else {
-      setSelected(block);
+      const at = trace && !block.children?.length ? stepForBlock(steps, block.id, reached) : null;
+      if (at !== null) goTo(at);
+      else setSelected(block);
     }
   };
 
   useEffect(() => {
-    if (!selected) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    if (!selected && entry === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (selected) setSelected(null);
+      else onWalk(null);
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [selected]);
+  }, [selected, entry, onWalk]);
 
   return (
     <div className="flex items-start gap-6">
@@ -189,6 +236,11 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
                 {showTests ? "Hide" : "Show"} tests ({pruned.hidden})
               </button>
             )}
+            <button type="button" className="nav-btn" aria-pressed={entry !== null}
+              disabled={!entryList.length} title={entryList.length ? undefined : "This map has no entry blocks"}
+              onClick={() => onWalk(entry === null ? entryList[0].id : null)}>
+              ⏵ Walkthrough
+            </button>
             <button type="button" className="nav-btn" onClick={() => setOpen(new Set(parents))}>Expand all</button>
             <button type="button" className="nav-btn" onClick={() => setOpen(new Set())}>Collapse all</button>
           </span>
@@ -196,18 +248,22 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
         {failed ? (
           <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
             <p className="mb-3 text-xs text-stone-500">The flowchart couldn't be laid out, so here it is as a list.</p>
-            <BlockList blocks={blocks} expanded={expanded} onActivate={activate} />
+            <BlockList blocks={blocks} expanded={shownExpanded} onActivate={activate} />
           </div>
         ) : (
           <Suspense fallback={<div className="mt-4 h-[72vh] animate-pulse rounded-xl bg-stone-100 dark:bg-stone-900" />}>
-            <FlowChart blocks={blocks} expanded={expanded} selected={selected?.id ?? null}
+            <FlowChart blocks={blocks} expanded={shownExpanded} walk={walkMarksFor} selected={selected?.id ?? null}
               onActivate={activate} onFailed={() => setFailed(true)} />
           </Suspense>
         )}
       </div>
-      {selected && (
+      {selected ? (
         <FunctionPanel pr={pr} mapId={map.id} block={selected} headSha={map.headSha}
-          onClose={() => setSelected(null)} onShowInReview={onShowInReview} />
+          onClose={() => setSelected(null)} onShowInReview={onShowInReview}
+          onBack={entry !== null ? () => setSelected(null) : undefined} />
+      ) : entry !== null && (
+        <WalkthroughPanel entries={entryList} entry={entry} onEntry={(id) => onWalk(id)} blocks={byId}
+          walk={walkRun} step={step} onStep={goTo} onShowCode={setSelected} onClose={() => onWalk(null)} />
       )}
     </div>
   );

@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { LogicBlock, LogicFunctions, LogicMap, LogicState } from "../../api/types";
+import type { LogicBlock, LogicFunctions, LogicMap, LogicState, Trace } from "../../api/types";
 import { layoutFlow } from "../../lib/logicFlow";
 import { loadPref } from "../../state/storage";
 import { stubReactFlowEnvironment } from "../../test/reactFlow";
@@ -56,6 +57,19 @@ const SAVE_FNS: LogicFunctions = {
   functions: [...STORE_FNS.functions, ...SYNC_FNS.functions],
 };
 
+const TRACE: Trace = {
+  id: "t1", mapId: "m1", entryId: "start", proposed: true, usedAt: "",
+  inputs: [{ name: "form", description: "The form", value: { id: 7 } }],
+  steps: [
+    { blockId: "start", input: { form: { id: 7 } }, output: { ok: true }, note: "Accepts the form." },
+    { blockId: "store", input: { id: 7 }, output: { saved: true }, note: "Stores it." },
+    { blockId: "sync", input: { id: 7 }, output: { queued: true }, note: "Queues it.",
+      danger: [{ kind: "external", note: "Posts to the sync webhook" }] },
+  ],
+  outcome: { kind: "stopped", message: "The sync job runs elsewhere" },
+};
+const WALK = "/api/logic/m1/walkthrough";
+
 const state = (over: Partial<LogicState> = {}): LogicState => ({ available: true, map: null, stale: false, running: false, ...over });
 const LOGIC = `/api/pr/o/r/7/logic`;
 
@@ -73,11 +87,13 @@ function serve() {
   }));
 }
 
-function setup(onShowInReview = vi.fn()) {
+function setup(onShowInReview = vi.fn(), initialWalk: string | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(
-    <QueryClientProvider client={client}><LogicView pr={PR} head={HEAD} onShowInReview={onShowInReview} /></QueryClientProvider>,
-  );
+  function Wrapper() {
+    const [walk, setWalk] = useState<string | null>(initialWalk);
+    return <LogicView pr={PR} head={HEAD} walk={walk} onWalk={setWalk} onShowInReview={onShowInReview} />;
+  }
+  const view = render(<QueryClientProvider client={client}><Wrapper /></QueryClientProvider>);
   return { ...view, onShowInReview };
 }
 
@@ -107,6 +123,7 @@ beforeEach(() => {
     "GET /api/logic/m1/blocks/store/functions": STORE_FNS,
     "GET /api/logic/m1/blocks/sync/functions": SYNC_FNS,
     "GET /api/logic/m1/blocks/save/functions": SAVE_FNS,
+    [`GET ${WALK}?entry=start`]: { trace: TRACE, starting: TRACE.inputs, running: false, error: null },
   };
   serve();
 });
@@ -309,4 +326,69 @@ test("test blocks are hidden until you ask for them, and the choice is kept", as
   expect(await node(/Test: retries are tried five times/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Hide tests (1)" })).toHaveAttribute("aria-pressed", "true");
   expect(loadPref(PR, "logicShowTests", false)).toBe(true);
+});
+
+test("the Walkthrough button opens the panel on the first entry and expands the path without saving it", async () => {
+  setup();
+  await userEvent.click(await screen.findByRole("button", { name: /Walkthrough/ }));
+  const panel = await screen.findByRole("complementary", { name: "Walkthrough" });
+  expect(await within(panel).findByText("Accepts the form.")).toBeInTheDocument();
+  // "Save and sync" holds steps of the trace, so it's expanded for the walkthrough...
+  expect(await node(/⊖ Save and sync/)).toBeInTheDocument();
+  // ...without touching the reviewer's saved choice.
+  expect(loadPref(PR, "logicExpanded", [])).toEqual([]);
+  expect((await node(/^Form is submitted/)).className).toMatch(/walk-current/);
+  // The panel's danger list has a "Queue a sync" button too; the chart's is the one outside it.
+  const queued = (await screen.findAllByRole("button", { name: /^Queue a sync/ })).find((b) => !b.closest("aside"));
+  expect(queued).toHaveAccessibleName(/flagged as dangerous: External effect/);
+
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("complementary", { name: "Walkthrough" })).toBeNull();
+  expect(await node(/^Save and sync ⊕/)).toBeInTheDocument();
+  expect(document.querySelector(".walk-current, .walk-step")).toBeNull();
+});
+
+test("clicking a visited block jumps to its step; others open their code", async () => {
+  setup(vi.fn(), "start");
+  const panel = await screen.findByRole("complementary", { name: "Walkthrough" });
+  await within(panel).findByText("Step 1 of 3");
+  await userEvent.click(within(panel).getByRole("button", { name: /Next/ }));
+  await userEvent.click(within(panel).getByRole("button", { name: /Next/ }));
+  await userEvent.click(await node(/^Store the visit/));
+  expect(within(panel).getByText("Step 2 of 3")).toBeInTheDocument();
+});
+
+test("Show code opens the function panel, and Back returns to the same step", async () => {
+  setup(vi.fn(), "start");
+  const panel = await screen.findByRole("complementary", { name: "Walkthrough" });
+  await userEvent.click(await within(panel).findByRole("button", { name: /Next/ }));
+  await userEvent.click(within(panel).getByRole("button", { name: /Show code/ }));
+  const code = await screen.findByRole("complementary", { name: "Store the visit" });
+  await userEvent.click(within(code).getByRole("button", { name: /Back to walkthrough/ }));
+  expect(await screen.findByText("Step 2 of 3")).toBeInTheDocument();
+});
+
+test("an unknown ?walk= entry falls back to the first entry", async () => {
+  setup(vi.fn(), "gone");
+  const panel = await screen.findByRole("complementary", { name: "Walkthrough" });
+  expect(within(panel).getByRole("combobox", { name: "Entry" })).toHaveValue("start");
+  await within(panel).findByText("Accepts the form.");
+  expect(calls).not.toContain(`GET ${WALK}?entry=gone`);
+});
+
+test("a step in a hidden test block is still drawn", async () => {
+  routes[`GET ${WALK}?entry=start`] = {
+    trace: { ...TRACE, steps: [TRACE.steps[0], { blockId: "spec", input: {}, output: {}, note: "Runs the test." }] },
+    starting: TRACE.inputs, running: false, error: null,
+  };
+  setup(vi.fn(), "start");
+  expect(await node(/^Test: retries are tried five times/)).toBeInTheDocument();
+});
+
+test("with no entry blocks the Walkthrough button is disabled", async () => {
+  routes[`GET ${LOGIC}?head=${HEAD}`] = state({ map: { ...MAP, blocks: [{ ...BLOCKS[1] }] } });
+  setup();
+  const button = await screen.findByRole("button", { name: /Walkthrough/ });
+  expect(button).toBeDisabled();
+  expect(button).toHaveAttribute("title", "This map has no entry blocks");
 });

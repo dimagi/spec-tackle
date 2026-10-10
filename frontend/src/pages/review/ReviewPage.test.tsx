@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Page } from "../../api/types";
+import type { LogicBlock, Page, Trace } from "../../api/types";
+import { stubReactFlowEnvironment } from "../../test/reactFlow";
 import { makeActivity, makePage, makeThread } from "../../test/fixtures";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { ReviewPage } from "./ReviewPage";
@@ -29,20 +30,31 @@ test("a signed-out reviewer is sent to sign in, and back here afterwards", async
   expect(params.get("next")).toBeTruthy();
 });
 
-function renderReview(page: Page) {
+const ENTRY: LogicBlock = { id: "start", label: "Form is submitted", kind: "entry", change: "unchanged", next: [] };
+const LOGIC_MAP = { id: "m1", headSha: "abc", summary: "Maps it.", blocks: [ENTRY], createdAt: "2026-10-08T09:00:00Z" };
+const TRACE: Trace = {
+  id: "t1", mapId: "m1", entryId: "start", proposed: true, usedAt: "",
+  inputs: [], steps: [{ blockId: "start", input: {}, output: { ok: true }, note: "Accepts the form." }],
+  outcome: { kind: "exit", message: "Done" },
+};
+
+function renderReview(page: Page, { url = "/pr/o/r/7", map = false }: { url?: string; map?: boolean } = {}) {
   // jsdom has no layout observers; the margin and scroll spy only need them to exist.
   class Observer { observe() {} unobserve() {} disconnect() {} }
   vi.stubGlobal("ResizeObserver", Observer);
   vi.stubGlobal("IntersectionObserver", Observer);
+  // A rendered chart needs its nodes measured, which takes the fuller stand-ins.
+  if (map) stubReactFlowEnvironment();
   const reply = (body: unknown) => new Response(JSON.stringify(body));
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (url.endsWith("/page")) return reply(page);
     if (url.endsWith("/activity")) return reply(page.activity);
     if (url.includes("/claude/threads")) return reply([]);
-    if (url.includes("/logic?head=")) return reply({ available: true, map: null, stale: false, running: false });
+    if (url.includes("/logic?head=")) return reply({ available: true, map: map ? LOGIC_MAP : null, stale: false, running: false });
+    if (url.includes("/api/logic/m1/walkthrough?entry=start")) return reply({ trace: TRACE, starting: [], running: false, error: null });
     return reply({});
   }));
-  const router = createMemoryRouter([{ path: "/pr/:owner/:repo/:number", element: <ReviewPage /> }], { initialEntries: ["/pr/o/r/7"] });
+  const router = createMemoryRouter([{ path: "/pr/:owner/:repo/:number", element: <ReviewPage /> }], { initialEntries: [url] });
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><RouterProvider router={router} /></QueryClientProvider>);
   return router;
 }
@@ -97,4 +109,21 @@ test("a thread enlarges over the page; Escape or the backdrop puts it back, and 
   await userEvent.click(within(card("T2") as HTMLElement).getByRole("button", { name: "Enlarge thread" }));
   await userEvent.click(within(card("T2") as HTMLElement).getByRole("button", { name: "Shrink thread" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+test("?walk= opens the walkthrough in the Logic view; Esc, Code view and the button keep the URL in step", async () => {
+  Element.prototype.scrollIntoView ??= () => {};
+  const router = renderReview(makePage({ claude: true }), { url: "/pr/o/r/7?view=logic&walk=start", map: true });
+  expect(await screen.findByRole("complementary", { name: "Walkthrough" })).toBeInTheDocument();
+
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("complementary", { name: "Walkthrough" })).toBeNull();
+  expect(router.state.location.search).toBe("?view=logic");
+
+  await userEvent.click(screen.getByRole("button", { name: /Walkthrough/ }));
+  expect(router.state.location.search).toBe("?view=logic&walk=start");
+  expect(await screen.findByRole("complementary", { name: "Walkthrough" })).toBeInTheDocument();
+
+  await userEvent.click(within(screen.getByRole("tablist")).getByRole("tab", { name: "Code view" }));
+  expect(router.state.location.search).not.toContain("walk");
 });

@@ -9,16 +9,23 @@ type Props = {
   block: LogicBlock;
   headSha: string;
   onClose: () => void;
+  /** Set when the panel was opened from the walkthrough: returns to it. */
+  onBack?: () => void;
   onShowInReview: (path: string, line: number) => void;
 };
 
 /** The real functions behind a leaf block, with this PR's changes highlighted. */
-export function FunctionPanel({ pr, mapId, block, headSha, onClose, onShowInReview }: Props) {
+export function FunctionPanel({ pr, mapId, block, headSha, onClose, onBack, onShowInReview }: Props) {
   const fns = useLogicFunctions(mapId, block.id);
   return (
     <aside aria-label={block.label}
       className="sticky top-20 max-h-[calc(100vh-6rem)] w-[40%] shrink-0 overflow-y-auto rounded-xl border border-stone-200 bg-white shadow-sm dark:border-stone-800 dark:bg-stone-900">
       <div className="sticky top-0 flex items-start gap-2 border-b border-stone-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-stone-800 dark:bg-stone-900/95">
+        {onBack && (
+          <button type="button" onClick={onBack} className="shrink-0 text-xs font-semibold text-violet-700 hover:underline dark:text-violet-300">
+            ← Back to walkthrough
+          </button>
+        )}
         <h2 className="min-w-0 flex-1 text-sm font-semibold">{block.label}</h2>
         <button type="button" aria-label="Close" onClick={onClose} className="rounded px-1.5 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-800">×</button>
       </div>

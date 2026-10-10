@@ -292,7 +292,18 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       if (id === "logic") next.set("view", "logic");
-      else next.delete("view");
+      else {
+        next.delete("view");
+        next.delete("walk");
+      }
+      return next;
+    });
+  const walk = tab === "logic" ? params.get("walk") : null;
+  const setWalk = (entry: string | null) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (entry) next.set("walk", entry);
+      else next.delete("walk");
       return next;
     });
   useEffect(() => {
@@ -470,7 +481,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       />
       {logicVisited && (
         <div hidden={tab !== "logic"}>
-          <LogicView pr={pr} head={activity.headSha} onShowInReview={showInReview} />
+          <LogicView pr={pr} head={activity.headSha} walk={walk} onWalk={setWalk} onShowInReview={showInReview} />
         </div>
       )}
       <div className="flex" hidden={tab !== "review"}>
