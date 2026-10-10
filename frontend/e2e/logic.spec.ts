@@ -109,6 +109,18 @@ test("walk through the map, see danger, edit inputs and hit the cache", async ({
   // The loop holding step 2 is expanded for the walkthrough.
   await expect(chart.getByRole("button", { name: /⊖ Retry failures/ })).toBeVisible();
 
+  // Claude's proposed inputs fill the editor.
+  await panel.getByRole("button", { name: /^Inputs/ }).click();
+  await expect(panel.getByRole("textbox", { name: "form" })).toHaveValue(/"tries": 0/);
+  await panel.getByRole("button", { name: /^Inputs/ }).click();
+
+  // Stepping forward takes an edge, drawn on the map.
+  await page.keyboard.press("ArrowRight");
+  await expect(panel.getByText("Step 2 of 3")).toBeVisible();
+  await expect(chart.locator(".react-flow__edge.walk-taken").first()).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(panel.getByText("Step 1 of 3")).toBeVisible();
+
   // Danger is visible before it's reached, and the banner jumps to it.
   await expect(chart.getByRole("button", { name: /^Give up/ })).toHaveAccessibleName(/flagged as dangerous: Destructive/);
   await panel.getByRole("alert").getByRole("button", { name: /Give up · Destructive/ }).click();
@@ -130,11 +142,24 @@ test("walk through the map, see danger, edit inputs and hit the cache", async ({
   await panel.getByRole("button", { name: "Run" }).click();
   await expect(panel.getByText("Sent on the first try")).toBeVisible();
 
-  // Reset: the starting values' trace comes straight from the cache, with no progress card.
+  // Reset: the starting values' trace comes straight from the cache, so no new run starts.
   await panel.getByRole("button", { name: /^Inputs/ }).click();
+  const calls: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/walkthrough")) calls.push(`${r.method()} ${new URL(r.url()).pathname}`);
+  });
   await panel.getByRole("button", { name: "Reset" }).click();
+  await expect(panel.getByText("Step 1 of 3")).toBeVisible();
   await expect(panel.getByText("The first send fails.")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(panel.getByText("Step 3 of 3")).toBeVisible();
+  // A live fixed run would have given one step ending "Sent on the first try".
+  await expect(panel.getByText("Reached exit: Give up")).toBeVisible();
   await expect(panel.getByText("Reading app/retry.py")).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(calls.filter((c) => c.startsWith("POST"))).toHaveLength(1);
+  expect(calls.filter((c) => c.includes("/events"))).toHaveLength(0);
 
   await page.keyboard.press("Escape");
   await expect(page).not.toHaveURL(/walk=/);
