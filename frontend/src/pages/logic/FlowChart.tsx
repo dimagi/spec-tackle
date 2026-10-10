@@ -5,13 +5,16 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { LogicBlock, LogicKind } from "../../api/types";
+import type { DangerKind, LogicBlock, LogicKind } from "../../api/types";
 import { layoutFlow, type FlowNode } from "../../lib/logicFlow";
+import { DANGER_LABEL, edgeWalkClass, type Walk, type WalkMark } from "../../lib/walkthrough";
 
 type Props = {
   blocks: LogicBlock[];
   expanded: Set<string>;
   selected: string | null;
+  /** A walkthrough's marks, while its panel is open. */
+  walk?: Walk | null;
   /** A click shows a block's code; with Ctrl/⌘ it expands or collapses a block with steps inside. */
   onActivate: (block: LogicBlock, expand: boolean) => void;
   /** ELK couldn't lay the map out; the view shows it as a list instead. */
@@ -31,13 +34,14 @@ const countFunctions = (b: LogicBlock): number =>
   (b.functions?.length ?? 0) + (b.children ?? []).reduce((n, c) => n + countFunctions(c), 0);
 
 /** What a screen reader hears, and what a hover shows. */
-export function blockLabel(b: LogicBlock, expanded: boolean): string {
-  if (expanded) return `⊖ ${b.label}: show its code; Ctrl-click to collapse`;
+export function blockLabel(b: LogicBlock, expanded: boolean, danger: DangerKind[] = []): string {
+  const flagged = danger.length ? `; flagged as dangerous: ${danger.map((k) => DANGER_LABEL[k]).join(", ")}` : "";
+  if (expanded) return `⊖ ${b.label}: show its code; Ctrl-click to collapse${flagged}`;
   const more = !!b.children?.length;
-  return `${b.label}${more ? " ⊕" : ""}: ${b.kind}, show its code${more ? "; Ctrl-click to expand" : ""}`;
+  return `${b.label}${more ? " ⊕" : ""}: ${b.kind}, show its code${more ? "; Ctrl-click to expand" : ""}${flagged}`;
 }
 
-type Ctx = { selected: string | null; onActivate: Props["onActivate"]; activated: React.MutableRefObject<string | null> };
+type Ctx = { selected: string | null; onActivate: Props["onActivate"]; activated: React.MutableRefObject<string | null>; walk: Walk | null };
 const FlowCtx = createContext<Ctx>(null!);
 
 /** Click and keyboard handling shared by cards and groups. */
@@ -63,6 +67,21 @@ function useActivate(block: LogicBlock) {
   };
 }
 
+function walkClass(m: WalkMark | undefined): string {
+  if (!m) return "";
+  return [m.current && "walk-current", m.visited && !m.current && "walk-visited", m.dim && "walk-dim"].filter(Boolean).join(" ");
+}
+
+function WalkBadges({ mark }: { mark: WalkMark | undefined }) {
+  if (!mark) return null;
+  return (
+    <>
+      {mark.step !== null && <span className="walk-step" aria-hidden="true">{mark.step}</span>}
+      {mark.danger.length > 0 && <span className="walk-danger" aria-hidden="true">⚠</span>}
+    </>
+  );
+}
+
 function Handles() {
   return (
     <>
@@ -75,13 +94,16 @@ function Handles() {
 function Card({ data }: NodeProps<FlowNode>) {
   const b = data.block;
   const { selected, props } = useActivate(b);
+  const { walk } = useContext(FlowCtx);
+  const mark = walk?.marks.get(b.id);
   const steps = countSteps(b);
   const fns = countFunctions(b);
-  const label = blockLabel(b, false);
+  const label = blockLabel(b, false, mark?.danger);
   return (
     <div {...props} aria-label={label} title={label}
-      className={`logic-card nopan h-full rounded-xl border-2 px-3 py-2 shadow-sm ${TONE[b.change]} ${b.kind === "exit" ? "!border-rose-500" : ""} ${selected ? "is-selected" : ""}`}>
+      className={`logic-card nopan h-full rounded-xl border-2 px-3 py-2 shadow-sm ${TONE[b.change]} ${b.kind === "exit" ? "!border-rose-500" : ""} ${selected ? "is-selected" : ""} ${walkClass(mark)}`}>
       <Handles />
+      <WalkBadges mark={mark} />
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-500">
         <span className="text-xs" aria-hidden="true">{ICON[b.kind]}</span>{b.kind}
         <span className="ml-auto flex gap-1 normal-case tracking-normal">
@@ -97,11 +119,14 @@ function Card({ data }: NodeProps<FlowNode>) {
 function Box({ data }: NodeProps<FlowNode>) {
   const b = data.block;
   const { selected, props } = useActivate(b);
-  const label = blockLabel(b, true);
+  const { walk } = useContext(FlowCtx);
+  const mark = walk?.marks.get(b.id);
+  const label = blockLabel(b, true, mark?.danger);
   return (
     <div {...props} aria-label={label} title={label}
-      className={`logic-box nopan h-full w-full rounded-2xl border-2 border-dashed ${TONE[b.change]} ${selected ? "is-selected" : ""}`}>
+      className={`logic-box nopan h-full w-full rounded-2xl border-2 border-dashed ${TONE[b.change]} ${selected ? "is-selected" : ""} ${walkClass(mark)}`}>
       <Handles />
+      <WalkBadges mark={mark} />
       <div className="flex items-start gap-1.5 px-3 py-2 text-xs font-semibold leading-snug text-stone-700 dark:text-stone-200">
         <span aria-hidden="true" className="shrink-0 whitespace-nowrap">⊖ {ICON[b.kind]}</span><span className="line-clamp-2">{b.label}</span>
       </div>
@@ -112,7 +137,7 @@ function Box({ data }: NodeProps<FlowNode>) {
 const nodeTypes = { card: Card, box: Box };
 const FIT = { duration: 300, padding: 0.12 };
 
-function Flow({ blocks, expanded, onFailed }: Pick<Props, "blocks" | "expanded" | "onFailed">) {
+function Flow({ blocks, expanded, walk, onFailed }: Pick<Props, "blocks" | "expanded" | "onFailed"> & { walk: Walk | null }) {
   const [graph, setGraph] = useState<{ nodes: FlowNode[]; edges: Edge[] } | null>(null);
   const { fitView } = useReactFlow();
   const { activated } = useContext(FlowCtx);
@@ -142,13 +167,17 @@ function Flow({ blocks, expanded, onFailed }: Pick<Props, "blocks" | "expanded" 
     setGraph((g) => g && { ...g, nodes: applyNodeChanges(changes, g.nodes) });
   }, []);
 
-  const edges = useMemo(() => (graph?.edges ?? []).map((e) => ({
-    ...e,
-    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-    labelBgPadding: [6, 3] as [number, number],
-    labelBgBorderRadius: 6,
-    style: { strokeWidth: 1.5 },
-  })), [graph]);
+  const edges = useMemo(() => (graph?.edges ?? []).map((e) => {
+    const cls = walk ? edgeWalkClass(e.id, walk.taken, walk.path) : "";
+    return {
+      ...e,
+      className: cls || undefined,
+      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, ...(cls === "walk-taken" ? { color: "#2563eb" } : {}) },
+      labelBgPadding: [6, 3] as [number, number],
+      labelBgBorderRadius: 6,
+      style: cls === "walk-taken" ? { strokeWidth: 3, stroke: "#2563eb" } : { strokeWidth: 1.5 },
+    };
+  }), [graph, walk]);
 
   return (
     <ReactFlow
@@ -173,15 +202,15 @@ function useDarkMode() {
   return dark;
 }
 
-export default function FlowChart({ blocks, expanded, selected, onActivate, onFailed }: Props) {
+export default function FlowChart({ blocks, expanded, selected, walk = null, onActivate, onFailed }: Props) {
   const activated = useRef<string | null>(null);
-  const ctx = useMemo(() => ({ selected, onActivate, activated }), [selected, onActivate]);
+  const ctx = useMemo(() => ({ selected, onActivate, activated, walk }), [selected, onActivate, walk]);
   return (
     <div className="logic-flow mt-4 h-[72vh] overflow-hidden rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
       <FlowCtx.Provider value={ctx}>
         <ReactFlowProvider>
           <FitOnResize />
-          <Flow blocks={blocks} expanded={expanded} onFailed={onFailed} />
+          <Flow blocks={blocks} expanded={expanded} walk={walk} onFailed={onFailed} />
         </ReactFlowProvider>
       </FlowCtx.Provider>
     </div>

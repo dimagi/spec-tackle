@@ -107,6 +107,9 @@ export function dangerSteps(steps: WalkStep[]): { index: number; kinds: DangerKi
 
 export type WalkMark = { current: boolean; visited: boolean; step: number | null; dim: boolean; danger: DangerKind[] };
 
+/** What the chart needs to draw a walkthrough: per-block marks, edges walked so far, and the whole path's edges (`path` holds edge ids). */
+export type Walk = { marks: Map<string, WalkMark>; taken: Set<string>; path: Set<string> };
+
 /** How each block of the map is drawn while the walkthrough is at step `current`. */
 export function walkMarks(blocks: LogicBlock[], steps: WalkStep[], current: number): Map<string, WalkMark> {
   const { byId } = index(blocks);

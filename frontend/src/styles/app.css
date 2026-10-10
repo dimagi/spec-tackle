@@ -486,6 +486,21 @@ html.dark .claude-error { color: #fca5a5; }
 .logic-item.added { border-left-color: #059669; }
 .logic-item.changed { border-left-color: #d97706; }
 
+/* Logic walkthrough (docs/specs/2026-10-10-logic-walkthrough-design.md) */
+.logic-flow .logic-card, .logic-flow .logic-box { position: relative; } /* anchors the step and danger badges */
+.logic-flow .walk-current { box-shadow: 0 0 0 4px #2563eb, 0 6px 18px rgba(37, 99, 235, .35); }
+.logic-flow .walk-visited { box-shadow: 0 0 0 3px rgba(37, 99, 235, .35); }
+.logic-flow .walk-dim { opacity: .3; }
+.logic-flow .react-flow__edge.walk-dim { opacity: .25; }
+.walk-step, .walk-danger { position: absolute; top: -10px; display: flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
+.walk-step { left: -10px; background: #2563eb; }
+.walk-danger { right: -10px; background: #dc2626; }
+.walk-json { margin: 0; overflow-x: auto; border-radius: .5rem; border: 1px solid var(--paper-border); background: var(--code-bg); font-size: 12px; line-height: 1.5; padding: .25rem 0; }
+.walk-json > div { white-space: pre; padding: 0 .75rem; }
+.walk-json > div.changed { background: rgba(16, 185, 129, .12); box-shadow: inset 3px 0 0 #10b981; }
+.walk-json.error { border-color: #f87171; background: #fef2f2; }
+:root.dark .walk-json.error { background: rgba(127, 29, 29, .35); }
+
 /* PR list quick filters */
 .pr-chip { border-radius: 999px; border: 1px solid var(--card-border); padding: 2px 10px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .pr-chip:hover { color: var(--ink); background: rgba(120,113,108,.08); }
