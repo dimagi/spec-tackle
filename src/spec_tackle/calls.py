@@ -189,3 +189,180 @@ def _blocks(node: ast.stmt) -> list[list[ast.stmt]]:
     blocks += [h.body for h in getattr(node, "handlers", [])]
     blocks += [c.body for c in getattr(node, "cases", [])]
     return [b for b in blocks if isinstance(b, list) and b and isinstance(b[0], ast.stmt)]
+
+
+# -- resolving calls ---------------------------------------------------------
+
+_RANK = {"call": 0, "ref": 1, "probable": 2}
+
+
+@dataclass(frozen=True)
+class Edge:
+    caller: str
+    callee: str
+    kind: str  # "call" | "ref" | "probable"
+    lines: tuple[int, ...]
+
+
+def resolve_edges(index: Index) -> list[Edge]:
+    """Every call and reference from one repo definition to another that `ast` can pin down."""
+    resolver = _Resolver(index)
+    found: dict[tuple[str, str], tuple[str, set[int]]] = {}
+
+    def add(caller: Definition, callee: Definition, kind: str, line: int) -> None:
+        key = (caller.id, callee.id)
+        old_kind, lines = found.get(key, (kind, set()))
+        lines.add(line)
+        found[key] = (min(old_kind, kind, key=_RANK.__getitem__), lines)
+
+    for module in index.modules.values():
+        for d in module.defs.values():
+            for callee, kind, line in resolver.uses(module, d):
+                add(d, callee, kind, line)
+    return [Edge(caller, callee, kind, tuple(sorted(lines))) for (caller, callee), (kind, lines) in found.items()]
+
+
+class _Resolver:
+    def __init__(self, index: Index):
+        self.index = index
+        self.methods: dict[str, list[Definition]] = {}
+        for d in index.defs.values():
+            name = d.qualname.rpartition(".")[2]
+            if d.kind == "method" and not (name.startswith("__") and name.endswith("__")):
+                self.methods.setdefault(name, []).append(d)
+
+    def uses(self, module: Module, d: Definition):
+        """(callee, kind, line) for each use in `d`'s own body; nested definitions are their own callers."""
+        chain = self._chain(d)
+        if d.kind == "class":
+            for base in d.node.bases:
+                target = self._expr(module, chain[1:], base)
+                if target:
+                    yield target, "ref", base.lineno
+        for node in _own_nodes(d.node):
+            if isinstance(node, ast.Call):
+                target = self._call(module, chain, node.func)
+                if target:
+                    yield target[0], target[1], node.lineno
+                for arg in [*node.args, *(k.value for k in node.keywords)]:
+                    yield from self._refs(module, chain, arg)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+                yield from self._refs(module, chain, node.value)
+
+    def _refs(self, module, chain, expr):
+        for value in _values(expr):
+            target = self._expr(module, chain, value)
+            if target:
+                yield target, "ref", value.lineno
+
+    def _call(self, module: Module, chain: list[Definition], func: ast.expr) -> tuple[Definition, str] | None:
+        target = self._expr(module, chain, func)
+        if target and target.kind == "class":
+            return self._member(target, "__init__") or target, "call"
+        if target:
+            return target, "call"
+        if isinstance(func, ast.Attribute) and not self._known_base(module, chain, func.value):
+            candidates = self.methods.get(func.attr, [])
+            if len(candidates) == 1:
+                return candidates[0], "probable"
+        return None
+
+    def _expr(self, module: Module, chain: list[Definition], expr: ast.expr) -> Definition | None:
+        """The definition an expression names, if any."""
+        if isinstance(expr, ast.Name):
+            return self._name(module, chain, expr.id)
+        if not isinstance(expr, ast.Attribute):
+            return None
+        cls = next((c for c in chain if c.kind == "class"), None)
+        base = expr.value
+        if isinstance(base, ast.Name) and base.id in ("self", "cls") and cls:
+            return self._member(cls, expr.attr)
+        if isinstance(base, ast.Call) and isinstance(base.func, ast.Name) and base.func.id == "super" and cls:
+            return self._member(cls, expr.attr, skip_self=True)
+        parts = _dotted(expr)
+        if not parts:
+            return None
+        first = self._name(module, chain, parts[0], imports=False)
+        if first is not None:
+            return self._member(first, parts[1]) if first.kind == "class" and len(parts) == 2 else None
+        target = module.imports.get(parts[0])
+        return self.index.lookup(".".join([target, *parts[1:]])) if target else None
+
+    def _name(self, module: Module, chain: list[Definition], name: str, imports: bool = True) -> Definition | None:
+        for scope in chain:
+            if scope.kind != "class":  # a class body's names aren't visible inside its methods
+                found = module.defs.get(f"{scope.qualname}.<locals>.{name}")
+                if found:
+                    return found
+        found = module.defs.get(name)
+        if found:
+            return found
+        target = module.imports.get(name) if imports else None
+        return self.index.lookup(target) if target else None
+
+    def _member(self, cls: Definition, name: str, skip_self: bool = False, seen=None) -> Definition | None:
+        """`name` on a class or, in order, its repo base classes."""
+        seen = seen or set()
+        if cls.id in seen:
+            return None
+        seen.add(cls.id)
+        module = self.index.modules[cls.path]
+        if not skip_self:
+            found = module.defs.get(f"{cls.qualname}.{name}")
+            if found:
+                return found
+        for base in cls.node.bases:
+            parent = self._expr(module, self._chain(cls)[1:], base)
+            if parent and parent.kind == "class":
+                found = self._member(parent, name, seen=seen)
+                if found:
+                    return found
+        return None
+
+    def _known_base(self, module: Module, chain: list[Definition], expr: ast.expr) -> bool:
+        """True when a receiver is a module, class or other known name: then a miss isn't 'probable'."""
+        parts = _dotted(expr) if isinstance(expr, ast.Attribute) else [expr.id] if isinstance(expr, ast.Name) else None
+        if not parts:
+            return False
+        return parts[0] in module.imports or self._name(module, chain, parts[0], imports=False) is not None
+
+    def _chain(self, d: Definition) -> list[Definition]:
+        chain = [d]
+        while chain[-1].parent:
+            chain.append(self.index.defs[chain[-1].parent])
+        return chain
+
+
+def _own_nodes(node: ast.AST):
+    """Every node in a definition's body, without descending into nested definitions."""
+    stack = list(reversed(node.body))
+    while stack:
+        current = stack.pop()
+        if isinstance(current, _DEF):
+            continue
+        yield current
+        stack.extend(reversed(list(ast.iter_child_nodes(current))))
+
+
+def _values(expr: ast.expr):
+    """The names in an expression used as values: itself, or the items of a literal list, tuple, set or dict."""
+    if isinstance(expr, (ast.Name, ast.Attribute)):
+        yield expr
+    elif isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+        for item in expr.elts:
+            yield from _values(item)
+    elif isinstance(expr, ast.Dict):
+        for item in expr.values:
+            yield from _values(item)
+    elif isinstance(expr, ast.Starred):
+        yield from _values(expr.value)
+
+
+def _dotted(expr: ast.Attribute) -> list[str] | None:
+    parts = []
+    while isinstance(expr, ast.Attribute):
+        parts.append(expr.attr)
+        expr = expr.value
+    if not isinstance(expr, ast.Name):
+        return None
+    return [expr.id, *reversed(parts)]

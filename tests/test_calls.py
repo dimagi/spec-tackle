@@ -154,3 +154,208 @@ def test_indexing_stops_at_the_file_cap(tmp_path):
     repo(tmp_path, {f"m{i}.py": "" for i in range(5)})
     index = calls.build_index(tmp_path, max_files=3)
     assert len(index.modules) == 3 and index.truncated is True
+
+
+# -- resolving calls ---------------------------------------------------------
+
+
+def edges(root: Path) -> set[tuple[str, str, str]]:
+    return {(e.caller, e.callee, e.kind) for e in calls.resolve_edges(calls.build_index(root))}
+
+
+def test_plain_names_resolve_in_the_module_and_through_imports(tmp_path):
+    repo(tmp_path, {
+        "app/util.py": "def clean(x):\n    return x\n",
+        "app/visits.py": '''
+            import os
+            from app.util import clean
+            from app import util
+            import app.util as u
+
+
+            def helper():
+                return os.path.join("a", "b")
+
+
+            def save():
+                helper()
+                clean(1)
+                util.clean(2)
+                u.clean(3)
+                print("done")
+        ''',
+    })
+    assert edges(tmp_path) == {
+        ("app/visits.py::save", "app/visits.py::helper", "call"),
+        ("app/visits.py::save", "app/util.py::clean", "call"),
+    }
+
+
+def test_calls_record_every_call_site_line(tmp_path):
+    repo(tmp_path, {"m.py": "def a():\n    pass\n\ndef b():\n    a()\n    a()\n"})
+    [edge] = calls.resolve_edges(calls.build_index(tmp_path))
+    assert edge.lines == (5, 6)
+
+
+def test_self_cls_and_super_resolve_through_the_class_and_its_bases(tmp_path):
+    repo(tmp_path, {
+        "base.py": '''
+            class Base:
+                def validate(self):
+                    pass
+
+                def save(self):
+                    pass
+        ''',
+        "child.py": '''
+            from base import Base
+
+
+            class Child(Base):
+                @classmethod
+                def make(cls):
+                    return cls.build()
+
+                @classmethod
+                def build(cls):
+                    pass
+
+                def save(self):
+                    self.validate()
+                    super().save()
+        ''',
+    })
+    got = edges(tmp_path)
+    assert ("child.py::Child.make", "child.py::Child.build", "call") in got
+    assert ("child.py::Child.save", "base.py::Base.validate", "call") in got
+    assert ("child.py::Child.save", "base.py::Base.save", "call") in got
+    assert ("child.py::Child.save", "child.py::Child.save", "call") not in got  # super() skips the class itself
+
+
+def test_instantiating_a_class_calls_its_init(tmp_path):
+    repo(tmp_path, {"m.py": '''
+        class Plain:
+            pass
+
+
+        class WithInit:
+            def __init__(self):
+                pass
+
+
+        class Sub(WithInit):
+            pass
+
+
+        def make():
+            Plain()
+            WithInit()
+            Sub()
+    '''})
+    got = edges(tmp_path)
+    assert ("m.py::make", "m.py::Plain", "call") in got
+    assert ("m.py::make", "m.py::WithInit.__init__", "call") in got
+    assert ("m.py::make", "m.py::Sub", "call") not in got
+    assert sum(1 for e in got if e[0] == "m.py::make" and e[1] == "m.py::WithInit.__init__") == 1
+
+
+def test_functions_passed_as_values_are_references(tmp_path):
+    repo(tmp_path, {"m.py": '''
+        def get_user():
+            pass
+
+
+        def on_save():
+            pass
+
+
+        class Model:
+            pass
+
+
+        def route(depends=None):
+            handlers = [on_save]
+            callback = on_save
+            route(depends=get_user)
+            return isinstance(handlers, Model)
+    '''})
+    got = edges(tmp_path)
+    assert ("m.py::route", "m.py::get_user", "ref") in got
+    assert ("m.py::route", "m.py::on_save", "ref") in got
+    assert ("m.py::route", "m.py::Model", "ref") in got
+    assert ("m.py::route", "m.py::route", "call") in got  # recursion is kept
+
+
+def test_a_subclass_refers_to_its_base(tmp_path):
+    repo(tmp_path, {"m.py": "class A:\n    pass\n\nclass B(A):\n    pass\n"})
+    assert edges(tmp_path) == {("m.py::B", "m.py::A", "ref")}
+
+
+def test_a_call_and_a_reference_to_the_same_function_merge_into_one_call(tmp_path):
+    repo(tmp_path, {"m.py": "def a():\n    pass\n\ndef b():\n    x = a\n    a()\n"})
+    [edge] = calls.resolve_edges(calls.build_index(tmp_path))
+    assert (edge.kind, edge.lines) == ("call", (5, 6))
+
+
+def test_unknown_receivers_are_probable_only_when_the_method_name_is_unique(tmp_path):
+    repo(tmp_path, {"m.py": '''
+        class Visit:
+            def submit(self):
+                pass
+
+            def save(self):
+                pass
+
+            def __len__(self):
+                return 0
+
+
+        class Form:
+            def save(self):
+                pass
+
+            def __len__(self):
+                return 0
+
+
+        def handle(obj):
+            obj.submit()
+            obj.save()
+            obj.__len__()
+    '''})
+    got = {e for e in edges(tmp_path) if e[0] == "m.py::handle"}
+    assert got == {("m.py::handle", "m.py::Visit.submit", "probable")}
+
+
+def test_star_imports_and_getattr_give_no_edge(tmp_path):
+    repo(tmp_path, {
+        "lib.py": "def hidden():\n    pass\n",
+        "m.py": "from lib import *\n\ndef go(obj):\n    hidden()\n    getattr(obj, 'hidden')()\n",
+    })
+    assert edges(tmp_path) == set()
+
+
+def test_calls_through_a_package_reexport_resolve(tmp_path):
+    repo(tmp_path, {
+        "pkg/__init__.py": "from .service import save\n",
+        "pkg/service.py": "def save():\n    pass\n",
+        "app.py": "from pkg import save\nimport pkg\n\ndef go():\n    save()\n    pkg.save()\n",
+    })
+    assert edges(tmp_path) == {("app.py::go", "pkg/service.py::save", "call")}
+
+
+def test_nested_functions_are_callers_of_their_own(tmp_path):
+    repo(tmp_path, {"m.py": '''
+        def target():
+            pass
+
+
+        def outer():
+            def inner():
+                target()
+            return inner()
+    '''})
+    assert edges(tmp_path) == {
+        ("m.py::outer.<locals>.inner", "m.py::target", "call"),
+        ("m.py::outer", "m.py::outer.<locals>.inner", "call"),
+    }
