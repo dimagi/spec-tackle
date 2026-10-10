@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { LogicBlock, LogicFunctions, LogicMap, LogicState } from "../../api/types";
+import type { CallTree, LogicBlock, LogicFunctions, LogicMap, LogicState } from "../../api/types";
 import { layoutFlow } from "../../lib/logicFlow";
 import { loadPref } from "../../state/storage";
 import { stubReactFlowEnvironment } from "../../test/reactFlow";
@@ -73,10 +73,10 @@ function serve() {
   }));
 }
 
-function setup(onShowInReview = vi.fn()) {
+function setup(onShowInReview = vi.fn(), props: Partial<React.ComponentProps<typeof LogicView>> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
-    <QueryClientProvider client={client}><LogicView pr={PR} head={HEAD} onShowInReview={onShowInReview} /></QueryClientProvider>,
+    <QueryClientProvider client={client}><LogicView pr={PR} head={HEAD} onShowInReview={onShowInReview} {...props} /></QueryClientProvider>,
   );
   return { ...view, onShowInReview };
 }
@@ -116,11 +116,52 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("shows nothing when Claude isn't available", async () => {
+test("Flow shows nothing when the server says Claude isn't available", async () => {
   routes[`GET ${LOGIC}?head=${HEAD}`] = state({ available: false });
-  const { container } = setup();
+  setup();
   await waitFor(() => expect(calls).toContain(`GET ${LOGIC}?head=${HEAD}`));
-  await waitFor(() => expect(container).toBeEmptyDOMElement());
+  expect(screen.queryByRole("button", { name: "Generate logic map" })).not.toBeInTheDocument();
+});
+
+const CALLS = "/api/pr/o/r/7/calls";
+const TREE: CallTree = {
+  headSha: HEAD,
+  nodes: [{ id: "app/visits.py::save", path: "app/visits.py", symbol: "save", start: 1, end: 4, kind: "function",
+    change: "changed", signatureChanged: false, decorators: [], test: false, up: 0, down: 0 }],
+  edges: [], other: [], truncated: null, depth: { up: 3, down: 3 },
+};
+
+test("without Claude, Flow says it needs Claude Code and asks the server nothing", async () => {
+  setup(vi.fn(), { claude: false, python: true });
+  expect(screen.getByText("The flowchart needs Claude Code. The call tree works without it.")).toBeInTheDocument();
+  expect(calls).toEqual([]);
+});
+
+test("Calls is disabled when the PR changes no Python files", async () => {
+  const onMode = vi.fn();
+  setup(vi.fn(), { python: false, onMode });
+  const tab = screen.getByRole("tab", { name: "Calls" });
+  expect(tab).toHaveAttribute("aria-disabled", "true");
+  expect(tab).toHaveAttribute("title", "This PR changes no Python files");
+  await userEvent.click(tab);
+  expect(onMode).not.toHaveBeenCalled();
+  expect(screen.getByRole("tab", { name: "Flow" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("switching to Calls shows the call tree, and switching back keeps the map as it was", async () => {
+  routes[`GET ${CALLS}?head=${HEAD}`] = TREE;
+  const onMode = vi.fn();
+  setup(vi.fn(), { python: true, onMode });
+  await modClick(await node(/Save and sync ⊕/));
+  expect(await node(/⊖ Save and sync/)).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("tab", { name: "Calls" }));
+  expect(onMode).toHaveBeenCalledWith("calls");
+  expect(await screen.findByRole("button", { name: /changed function save/ })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("tab", { name: "Flow" }));
+  expect(onMode).toHaveBeenLastCalledWith("flow");
+  expect(await node(/⊖ Save and sync/)).toBeVisible();
 });
 
 test("generate, follow progress, then show the map", async () => {

@@ -5,22 +5,79 @@ import { request } from "../../api/request";
 import type { LogicBlock, LogicMap, LogicState } from "../../api/types";
 import { allParentIds, withoutTests } from "../../lib/logicFlow";
 import { loadPref, savePref, type PRRef } from "../../state/storage";
+import { CallsView } from "./CallsView";
 import { FunctionPanel } from "./FunctionPanel";
 
 // React Flow and ELK load only when a map is shown.
 const FlowChart = lazy(() => import("./FlowChart"));
+
+export type LogicMode = "flow" | "calls";
 
 type Props = {
   pr: PRRef;
   /** The head commit of the page being reviewed. */
   head: string;
   onShowInReview: (path: string, line: number) => void;
+  /** Ask Claude is available: Flow can generate maps. */
+  claude?: boolean;
+  /** The PR changes Python files: Calls has something to show. */
+  python?: boolean;
+  mode?: LogicMode;
+  onMode?: (mode: LogicMode) => void;
 };
+
+/** The Logic tab: a Flow of the PR's behaviour (Claude), or the Calls of its changed Python code. */
+export function LogicView({ pr, head, onShowInReview, claude = true, python = false, mode: given = "flow", onMode }: Props) {
+  const [mode, setModeState] = useState<LogicMode>(given);
+  useEffect(() => setModeState(given), [given]);
+  // Each mode stays mounted once shown, so it keeps its state across switches.
+  const [visited, setVisited] = useState(() => new Set<LogicMode>([given]));
+  useEffect(() => setVisited((v) => (v.has(mode) ? v : new Set([...v, mode]))), [mode]);
+  const [focus] = useState<string | null>(null);
+  const setMode = (next: LogicMode) => {
+    setModeState(next);
+    onMode?.(next);
+  };
+
+  return (
+    <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
+      <div className="mb-5 flex">
+        <div className="flex rounded-lg bg-stone-200/70 p-0.5 text-xs font-medium dark:bg-stone-800" role="tablist" aria-label="Logic view mode">
+          <button type="button" role="tab" aria-selected={mode === "flow"} className={`seg ${mode === "flow" ? "on" : ""}`} onClick={() => setMode("flow")}>
+            Flow
+          </button>
+          <button type="button" role="tab" aria-selected={mode === "calls"} aria-disabled={!python}
+            title={python ? "How the changed Python functions are called" : "This PR changes no Python files"}
+            className={`seg ${mode === "calls" ? "on" : ""} ${python ? "" : "cursor-not-allowed opacity-50"}`}
+            onClick={() => python && setMode("calls")}>
+            Calls
+          </button>
+        </div>
+      </div>
+      {visited.has("flow") && (
+        <div hidden={mode !== "flow"}>
+          {claude ? (
+            <FlowView pr={pr} head={head} onShowInReview={onShowInReview} />
+          ) : (
+            <p className="mx-auto max-w-xl py-16 text-center text-sm text-stone-600 dark:text-stone-400">
+              The flowchart needs Claude Code. The call tree works without it.
+            </p>
+          )}
+        </div>
+      )}
+      {python && visited.has("calls") && (
+        <div hidden={mode !== "calls"}>
+          <CallsView pr={pr} head={head} focus={focus} onShowInReview={onShowInReview} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 type Run = { head: string; progress: string };
 
-/** The Logic tab: generate a map of the PR's behaviour, then explore it. */
-export function LogicView({ pr, head: pageHead, onShowInReview }: Props) {
+/** Flow: generate a map of the PR's behaviour, then explore it. */
+function FlowView({ pr, head: pageHead, onShowInReview }: Pick<Props, "pr" | "head" | "onShowInReview">) {
   // A run is for the PR's real head, which can be newer than the page's; follow that one.
   const [head, setHead] = useState(pageHead);
   useEffect(() => setHead(pageHead), [pageHead]);
@@ -84,7 +141,7 @@ export function LogicView({ pr, head: pageHead, onShowInReview }: Props) {
   const failure = run ? null : error ?? logic.data.error ?? null;
 
   return (
-    <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
+    <div>
       {run && (
         <Card>
           <div className="flex items-center gap-3">
