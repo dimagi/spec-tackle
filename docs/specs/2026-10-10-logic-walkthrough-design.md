@@ -15,9 +15,10 @@ sees where the logic goes, or where it breaks.
 Nothing is executed. Claude dry-runs the code: it reads the real functions behind each
 block and works out what each step would receive and return. Values it can't get from
 the code, such as database rows, API replies or the clock, it invents and marks as
-assumed. Steps whose code deletes or overwrites data are flagged as dangerous. Steps with
-other notable effects, such as external calls, are tagged neutrally, so the reviewer sees
-what the PR does to data and the outside world.
+assumed. Steps whose code looks malicious are flagged as dangerous. Steps with notable
+effects, such as external calls or deleting data, are tagged neutrally, so the reviewer
+sees what the PR does to data and the outside world without every such step looking
+like an attack.
 
 ## Hard requirements
 
@@ -51,26 +52,34 @@ It's enforced in layers, so no single slip can break it:
 Widening the tool list for the walkthrough, or for any other Claude feature, needs a spec
 change that addresses this section.
 
-### 2. Destructive code is flagged; other effects are tagged
+### 2. Malicious code is flagged; effects are tagged
 
-**Danger means destructive.** A step is dangerous when its code deletes or overwrites
-data: `DELETE`/`DROP`/`TRUNCATE`, bulk updates, removing files or directories, clearing
-caches or queues. Claude flags such code on its step, even when the trace's inputs don't
-reach it. For example, a delete that only runs on another branch is still flagged on the
-step that holds it. Each flag says, in a sentence, what the code does and where: "Calls
-`Visit.objects.filter(owner=user).delete()` without a status filter
-(app/visits/services.py:142)."
+**Danger means malicious.** A step is dangerous only when its code appears meant to
+cause harm. Examples:
 
-**Other notable operations are effects.** Claude tags them neutrally, also whether or
-not the inputs reach them:
+- sending secrets, credentials or user data somewhere they shouldn't go;
+- a backdoor, a hidden account, or a check that quietly bypasses authentication or
+  permissions;
+- fetching and running remote code, or code obfuscated to hide what it does;
+- deliberate sabotage, such as corrupting or wiping data on a trigger or a date;
+- crypto-mining or other abuse of the host's resources.
+
+Claude flags such code on its step, even when the trace's inputs don't reach it. Each
+flag says, in a sentence, what the code does, why it looks intended to harm, and where:
+"Posts `os.environ` to `https://paste.example/api` on every login (app/auth.py:88)."
+Claude doesn't need to be certain. When it suspects malice, it flags the code and says
+why, and the reviewer decides.
+
+**Risky isn't malicious.** Legitimate operations that happen to be risky are **not**
+danger. Claude tags them as neutral **effects** instead, also whether or not the inputs
+reach them:
 
 | Kind | Examples |
 |---|---|
 | `external` | Effects outside the system: sending email, SMS or push notifications, charging payments, calling webhooks or third-party APIs, publishing messages. |
-| `unsafe` | A security risk: SQL built by string formatting, shell or `eval` built from input, deserialising untrusted data, paths from input without checks, a missing permission check. |
-| `irreversible` | Can't be undone some other way: schema migrations, revoking access, rotating or deleting keys. |
-
-Deleting or overwriting data is always danger, never an effect.
+| `destructive` | Deletes or overwrites data: `DELETE`/`DROP`/`TRUNCATE`, bulk updates, removing files, clearing caches or queues. |
+| `unsafe` | An apparent accident that's a security risk: SQL built by string formatting, shell or `eval` built from input, deserialising untrusted data, paths from input without checks, a missing permission check. |
+| `irreversible` | Can't be undone some other way: schema or data migrations, revoking access, rotating or deleting keys. |
 
 Each effect says what the code does and where: "Posts the visit to the sync webhook
 (app/sync.py:40)."
@@ -87,8 +96,8 @@ to GitHub.
 |---|---|
 | What it's for | Both understanding (follow one example through) and bug hunting (try edge cases and see where it breaks). |
 | How values are worked out | Claude reads the code and traces it by hand. Nothing in the PR is run; Claude keeps the same read-only tools as the map. See Hard requirements. |
-| Dangerous code | Only code that deletes or overwrites data is flagged, in red, with a one-sentence note, whether or not the trace's inputs reach it. |
-| Effects | Other notable operations are tagged neutrally per step, with a kind (`external`, `unsafe`, `irreversible`) and a one-sentence note. |
+| Dangerous code | Only code that looks malicious is flagged, in red, with a one-sentence reason, whether or not the trace's inputs reach it. |
+| Effects | Notable but legitimate operations are tagged neutrally per step, with a kind (`external`, `destructive`, `unsafe`, `irreversible`) and a one-sentence note. |
 | Granularity | Leaf by leaf. Leaves are where the real functions are. Blocks with steps inside are never steps themselves. |
 | Entries | One entry per run. The reviewer picks an entry block, and the trace goes from there to an exit, an error, or a point where Claude stops. |
 | When Claude runs | On demand. Opening an entry for the first time proposes inputs and traces them in one run. Editing inputs and pressing **Run** traces the new values. Map generation is unchanged. |
@@ -123,16 +132,16 @@ Step {
                              # on an error step, the error, e.g. {"raises": "KeyError('location')"}
   note: str                  # what happened and why; 1-200 characters
   assumed?: str[]            # values Claude invented; at most 5, each 1-120 characters
-  danger?: Danger[]          # code that deletes or overwrites data; at most 5
-  effects?: Effect[]         # other notable operations; at most 5
+  danger?: Danger[]          # code that looks malicious; at most 5
+  effects?: Effect[]         # notable, legitimate operations; at most 5
 }
 
 Danger {
-  note: str                  # what the code deletes or overwrites, and where; 1-200 characters
+  note: str                  # what the code does, why it looks malicious, and where; 1-200 characters
 }
 
 Effect {
-  kind: "external" | "unsafe" | "irreversible"
+  kind: "external" | "destructive" | "unsafe" | "irreversible"
   note: str                  # what the code does and where; 1-200 characters
 }
 
@@ -155,7 +164,7 @@ The server rejects a trace, and lists every problem it finds, when:
 - there are no steps or more than 60, or a step has more than 5 assumptions, more than 5
   danger flags or more than 5 effects;
 - a danger flag's note is empty or too long;
-- an effect's `kind` isn't one of the three kinds, or its note is empty or too long;
+- an effect's `kind` isn't one of the four kinds, or its note is empty or too long;
 - a step's `blockId` isn't a leaf of this map;
 - the first step isn't the entry block itself (when it is a leaf) or a leaf inside it;
 - `outcome.kind` is `exit` but the last step isn't a leaf of kind `exit`;
@@ -195,11 +204,11 @@ One repair turn is allowed on invalid output, as for the map.
      - never run, or try to run, any code; work out every value by reading;
      - go leaf by leaf, from the entry, and read the real functions behind each leaf;
      - list every value you made up under `assumed`;
-     - flag every operation that deletes or overwrites data under `danger`, even when these
+     - flag code that appears meant to cause harm under `danger`, saying why, even when these
        inputs don't reach it;
-     - tag other notable operations under `effects`, using the three kinds and their examples,
-       also when these inputs don't reach them; deleting or overwriting data never goes under
-       `effects`;
+     - tag notable but legitimate operations under `effects`, using the four kinds and their
+       examples, also when these inputs don't reach them; risky isn't malicious, so these never
+       go under `danger`;
      - where the code would raise, end with an `error` outcome and the error as the last
        step's output;
      - if you can't tell what the code does next, end with a `stopped` outcome that says
@@ -236,12 +245,12 @@ returns 404 for a map that belongs to another login.
    Entries that are test blocks are listed only while "Show tests" is on. It starts on the
    first top-level entry.
    - **Danger summary.** When any step of the trace has a danger flag, a red banner sits
-     below the picker: "⚠ 2 steps delete or overwrite data". It lists each flagged step's label, and
+     below the picker: "⚠ 2 steps look malicious". It lists each flagged step's label, and
      clicking one jumps to that step. The banner stays on every step, so a flag is never
      missed by stepping past it.
    - **Effects summary.** When any step has effects, a neutral grey line sits below that:
-     "Effects: 2 external calls · 1 security risk", using one phrase per kind ("external
-     call(s)", "security risk(s)", "irreversible"). Each phrase opens a short
+     "Effects: 2 external calls · 1 deletes data", using one phrase per kind ("external
+     call(s)", "deletes data", "security risk(s)", "irreversible"). Each phrase opens a short
      list of its steps, and clicking one jumps to it.
 2. **Inputs.** A collapsible section.
    - Its header always shows a summary: "Inputs ▸ 4 values · proposed by Claude", or
@@ -259,9 +268,9 @@ returns 404 for a map that belongs to another login.
    - The block's kind icon and label.
    - The note.
    - **Danger** flags, above everything else after the note. Each is a red box with
-     "⚠ Destructive" and the note.
-   - **Effects**, as neutral grey chips: the kind ("External call", "Security risk",
-     "Irreversible") and the note.
+     "⚠ Looks malicious" and the note.
+   - **Effects**, as neutral grey chips: the kind ("External call", "Deletes data",
+     "Security risk", "Irreversible") and the note.
    - **Assumed** chips, one per assumption, styled as warnings, with a tooltip: "Claude
      couldn't read this from the code, so it assumed it."
    - **Input** and **Output** as formatted JSON. In the output, top-level keys that are new,
@@ -300,10 +309,10 @@ While the panel is open with a trace:
   includes the block itself). If there's no such edge, nothing is highlighted.
 - **Danger.** A leaf with a danger flag in the trace gets a red "⚠" badge on its card from
   the moment the trace loads, before it's reached. Its `aria-label` and tooltip add
-  "destructive".
+  "looks malicious".
 - **Effects.** A leaf with effects gets a small neutral grey "ⓘ" badge, also from the moment
   the trace loads. Its `aria-label` and tooltip add the effect kinds, e.g. "effects: External
-  call, Security risk". When a leaf has both, the red badge comes first.
+  call, Deletes data". When a leaf has both, the red badge comes first.
 - **Off the path.** Blocks with no step at or inside them, and edges not on the path, are
   dimmed. The path is shown even when its blocks are tests and tests are hidden.
 - **Clicking.** Clicking a visited block, or pressing Enter on it, jumps to its latest step at
@@ -389,7 +398,7 @@ Input values, notes and JSON are shown as plain React text, never as HTML.
   - the guard denies Bash, Write, Edit, NotebookEdit, WebFetch, WebSearch, Task and an
     `mcp__…` tool name;
   - the walkthrough system prompt contains the never-run instruction, defines danger as
-    code that deletes or overwrites data, and names the three effect kinds;
+    malicious code, says risky isn't malicious, and names the four effect kinds;
   - a walkthrough run starts no subprocess other than through `Checkouts` (patch
     `asyncio.create_subprocess_exec` and `subprocess` and check they're unused by the run
     itself, with the worktree already present).
@@ -449,12 +458,12 @@ Input values, notes and JSON are shown as plain React text, never as HTML.
 
 - open the walkthrough, and see the proposed inputs and step 1 highlighted;
 - step to the end, and see the edges taken and the outcome;
-- see the danger banner and the ⚠ badge for a canned destructive step, and jump to it;
+- see the danger banner and the ⚠ badge for a canned malicious step, and jump to it;
 - see the effects summary and the ⓘ badge for a canned external call, with no danger styling;
 - edit an input, run it, and see the new trace;
 - run the same values again, and see the cached trace with no progress card.
 
 **Manual:** walk through a real PR on the reviewer's own server, once with the proposed
 inputs and once with an edge case, to judge whether the traces are accurate and useful.
-Include a PR with a known delete and a known external call, and check that the delete is
-flagged red and the external call is tagged as a grey effect.
+Include a PR with a known destructive or external call, and check that it's tagged as an
+effect and not flagged as dangerous.
