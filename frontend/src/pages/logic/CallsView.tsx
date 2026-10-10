@@ -11,8 +11,8 @@ const CallChart = lazy(() => import("./CallChart"));
 type Props = {
   pr: PRRef;
   head: string;
-  /** A node to focus and open, e.g. from the Flow view's function panel. */
-  focus: string | null;
+  /** A node to focus and open, e.g. from the Flow view's function panel. A new object each time. */
+  focus: { id: string } | null;
   onShowInReview: (path: string, line: number) => void;
 };
 
@@ -59,7 +59,7 @@ function summary(tree: CallTree): string {
   return notUpdated ? `${parts} · ${plural(notUpdated, "caller")} not updated` : parts;
 }
 
-function TreeView({ pr, tree, focus, onShowInReview }: { pr: PRRef; tree: CallTree; focus: string | null; onShowInReview: Props["onShowInReview"] }) {
+function TreeView({ pr, tree, focus, onShowInReview }: { pr: PRRef; tree: CallTree; focus: Props["focus"]; onShowInReview: Props["onShowInReview"] }) {
   const clamp = (d: { up: number; down: number }) => ({ up: Math.min(d.up, tree.depth.up), down: Math.min(d.down, tree.depth.down) });
   const [depth, setDepthState] = useState(() => clamp(loadPref(pr, "callsDepth", { up: 2, down: 1 })));
   const testCount = tree.nodes.filter((n) => n.test).length;
@@ -68,12 +68,12 @@ function TreeView({ pr, tree, focus, onShowInReview }: { pr: PRRef; tree: CallTr
   const [tests, setTests] = useState(() => loadPref(pr, "callsShowTests", onlyTests));
   const [probable, setProbable] = useState(true);
   const [breakage, setBreakage] = useState(false);
-  const [selected, setSelected] = useState<string | null>(focus);
-  const [focused, setFocused] = useState<string | null>(focus);
+  const [selected, setSelected] = useState<string | null>(focus?.id ?? null);
+  const [focused, setFocused] = useState<string | null>(focus?.id ?? null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (focus) { setSelected(focus); setFocused(focus); }
+    if (focus) { setSelected(focus.id); setFocused(focus.id); }
   }, [focus]);
 
   const setDepth = (next: { up: number; down: number }) => {

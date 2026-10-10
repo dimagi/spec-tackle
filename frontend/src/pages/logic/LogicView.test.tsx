@@ -351,3 +351,29 @@ test("test blocks are hidden until you ask for them, and the choice is kept", as
   expect(screen.getByRole("button", { name: "Hide tests (1)" })).toHaveAttribute("aria-pressed", "true");
   expect(loadPref(PR, "logicShowTests", false)).toBe(true);
 });
+
+test("a function in Flow's panel links to the call tree, which opens on that node", async () => {
+  routes[`GET ${CALLS}?head=${HEAD}`] = TREE;
+  routes[`GET ${CALLS}/source?head=${HEAD}&node=${encodeURIComponent("app/visits.py::save")}`] = {
+    path: "app/visits.py", symbol: "save", start: 1, end: 4, inDiff: true, lines: [{ n: 1, html: "def save():", changed: true }],
+  };
+  const onMode = vi.fn();
+  setup(vi.fn(), { python: true, onMode });
+  await userEvent.click(await node(/Save and sync ⊕/));
+  const panel = await screen.findByRole("complementary", { name: "Save and sync" });
+  // save is in the call tree; push (lib/queue.py) isn't.
+  const links = await within(panel).findAllByRole("button", { name: "Calls" });
+  expect(links).toHaveLength(1);
+
+  await userEvent.click(links[0]);
+  expect(onMode).toHaveBeenLastCalledWith("calls");
+  expect(screen.getByRole("tab", { name: "Calls" })).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByRole("complementary", { name: "save()" })).toBeInTheDocument();
+});
+
+test("without Python changes, Flow's panel doesn't ask for the call tree", async () => {
+  setup();
+  await userEvent.click(await node(/Save and sync ⊕/));
+  await screen.findByRole("complementary", { name: "Save and sync" });
+  expect(calls.some((c) => c.includes("/calls"))).toBe(false);
+});

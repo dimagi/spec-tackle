@@ -195,7 +195,7 @@ test("Show in Code view goes to the first changed line", async () => {
 });
 
 test("a focus from outside opens that node", async () => {
-  setup({ focus: "app/retry.py::backoff" });
+  setup({ focus: { id: "app/retry.py::backoff" } });
   expect(await screen.findByRole("complementary", { name: "backoff()" })).toBeInTheDocument();
 });
 

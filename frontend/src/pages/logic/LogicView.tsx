@@ -33,7 +33,7 @@ export function LogicView({ pr, head, onShowInReview, claude = true, python = fa
   // Each mode stays mounted once shown, so it keeps its state across switches.
   const [visited, setVisited] = useState(() => new Set<LogicMode>([given]));
   useEffect(() => setVisited((v) => (v.has(mode) ? v : new Set([...v, mode]))), [mode]);
-  const [focus] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ id: string } | null>(null);
   const setMode = (next: LogicMode) => {
     setModeState(next);
     onMode?.(next);
@@ -57,7 +57,8 @@ export function LogicView({ pr, head, onShowInReview, claude = true, python = fa
       {visited.has("flow") && (
         <div hidden={mode !== "flow"}>
           {claude ? (
-            <FlowView pr={pr} head={head} onShowInReview={onShowInReview} />
+            <FlowView pr={pr} head={head} onShowInReview={onShowInReview} python={python}
+              onShowCalls={(id) => { setFocus({ id }); setMode("calls"); }} />
           ) : (
             <p className="mx-auto max-w-xl py-16 text-center text-sm text-stone-600 dark:text-stone-400">
               The flowchart needs Claude Code. The call tree works without it.
@@ -77,7 +78,13 @@ export function LogicView({ pr, head, onShowInReview, claude = true, python = fa
 type Run = { head: string; progress: string };
 
 /** Flow: generate a map of the PR's behaviour, then explore it. */
-function FlowView({ pr, head: pageHead, onShowInReview }: Pick<Props, "pr" | "head" | "onShowInReview">) {
+type FlowProps = Pick<Props, "pr" | "head" | "onShowInReview"> & {
+  python: boolean;
+  /** Open a function in the call tree. */
+  onShowCalls: (nodeId: string) => void;
+};
+
+function FlowView({ pr, head: pageHead, onShowInReview, python, onShowCalls }: FlowProps) {
   // A run is for the PR's real head, which can be newer than the page's; follow that one.
   const [head, setHead] = useState(pageHead);
   useEffect(() => setHead(pageHead), [pageHead]);
@@ -164,7 +171,7 @@ function FlowView({ pr, head: pageHead, onShowInReview }: Pick<Props, "pr" | "he
         </Card>
       )}
       {map ? (
-        <MapView key={map.id} pr={pr} map={map} onShowInReview={onShowInReview} />
+        <MapView key={map.id} pr={pr} map={map} onShowInReview={onShowInReview} python={python} onShowCalls={onShowCalls} />
       ) : !run && !failure && (
         <div className="mx-auto max-w-xl py-16 text-center">
           <h2 className="font-serif text-2xl font-semibold">See what this PR does</h2>
@@ -194,7 +201,9 @@ function Card({ children, tone = "info" }: { children: React.ReactNode; tone?: "
 
 // -- the map ------------------------------------------------------------------
 
-function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShowInReview: Props["onShowInReview"] }) {
+function MapView({ pr, map, onShowInReview, python, onShowCalls }: {
+  pr: PRRef; map: LogicMap; onShowInReview: Props["onShowInReview"]; python: boolean; onShowCalls: FlowProps["onShowCalls"];
+}) {
   const parents = useMemo(() => new Set(allParentIds(map.blocks)), [map.blocks]);
   const [expanded, setExpanded] = useState(
     () => new Set(loadPref<string[]>(pr, "logicExpanded", []).filter((id) => parents.has(id))),
@@ -264,7 +273,7 @@ function MapView({ pr, map, onShowInReview }: { pr: PRRef; map: LogicMap; onShow
       </div>
       {selected && (
         <FunctionPanel pr={pr} mapId={map.id} block={selected} headSha={map.headSha}
-          onClose={() => setSelected(null)} onShowInReview={onShowInReview} />
+          onClose={() => setSelected(null)} onShowInReview={onShowInReview} python={python} onShowCalls={onShowCalls} />
       )}
     </div>
   );
