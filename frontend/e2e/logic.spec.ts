@@ -94,3 +94,48 @@ test("blocks can be dragged around the map, and a drag doesn't open the block", 
   await page.mouse.up();
   expect((await group.boundingBox())!.width).toBeGreaterThan(g.width + 100);
 });
+
+test("walk through the map, see danger, edit inputs and hit the cache", async ({ page }) => {
+  await page.goto("/pr/o/r/7?view=logic");
+  await page.getByRole("button", { name: "Generate logic map" }).click();
+  await expect(page.getByText("Failed form submissions are retried with backoff")).toBeVisible();
+
+  await page.getByRole("button", { name: /Walkthrough/ }).click();
+  await expect(page).toHaveURL(/walk=send/);
+  const panel = page.getByRole("complementary", { name: "Walkthrough" });
+  await expect(panel.getByText("The first send fails.")).toBeVisible();
+  const chart = page.locator(".logic-flow");
+  await expect(chart.getByRole("button", { name: /^Form is sent/ })).toHaveClass(/walk-current/);
+  // The loop holding step 2 is expanded for the walkthrough.
+  await expect(chart.getByRole("button", { name: /⊖ Retry failures/ })).toBeVisible();
+
+  // Danger is visible before it's reached, and the banner jumps to it.
+  await expect(chart.getByRole("button", { name: /^Give up/ })).toHaveAccessibleName(/flagged as dangerous: Destructive/);
+  await panel.getByRole("alert").getByRole("button", { name: /Give up · Destructive/ }).click();
+  await expect(panel.getByText("Step 3 of 3")).toBeVisible();
+  await expect(panel.getByText("Deletes the queued form (app/retry.py:2)")).toBeVisible();
+  await expect(panel.getByText("Reached exit: Give up")).toBeVisible();
+
+  await page.keyboard.press("ArrowLeft");
+  await expect(panel.getByText("Step 2 of 3")).toBeVisible();
+  await expect(panel.getByText("assumed: The server stays down")).toBeVisible();
+
+  // A reload comes back to the same walkthrough.
+  await page.reload();
+  await expect(page.getByRole("complementary", { name: "Walkthrough" }).getByText("Step 1 of 3")).toBeVisible();
+
+  // New inputs: a fresh run.
+  await panel.getByRole("button", { name: /^Inputs/ }).click();
+  await panel.getByRole("textbox", { name: "form" }).fill('{"id": 7, "tries": 4}');
+  await panel.getByRole("button", { name: "Run" }).click();
+  await expect(panel.getByText("Sent on the first try")).toBeVisible();
+
+  // Reset: the starting values' trace comes straight from the cache, with no progress card.
+  await panel.getByRole("button", { name: /^Inputs/ }).click();
+  await panel.getByRole("button", { name: "Reset" }).click();
+  await expect(panel.getByText("The first send fails.")).toBeVisible();
+  await expect(panel.getByText("Reading app/retry.py")).toHaveCount(0);
+
+  await page.keyboard.press("Escape");
+  await expect(page).not.toHaveURL(/walk=/);
+});

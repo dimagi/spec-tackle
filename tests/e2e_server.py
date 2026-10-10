@@ -16,7 +16,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from spec_tackle import app as web, claude_api, logic, refs  # noqa: E402
+from spec_tackle import app as web, claude_api, logic, refs, walkthrough  # noqa: E402
 from spec_tackle.access import Access  # noqa: E402
 from spec_tackle.app import app  # noqa: E402
 from spec_tackle.auth import NotSignedIn  # noqa: E402
@@ -228,8 +228,27 @@ LOGIC_MAP = {
 }
 
 
+WALK_INPUTS = [{"name": "form", "description": "The submitted form", "value": {"id": 7, "tries": 0}}]
+WALK_STEPS = [
+    {"blockId": "send", "input": {"form": {"id": 7}}, "output": {"sent": False}, "note": "The first send fails."},
+    {"blockId": "backoff", "input": {"tries": 1}, "output": {"tries": 5}, "note": "Backs off and resends four more times.",
+     "assumed": ["The server stays down"]},
+    {"blockId": "give-up", "input": {"tries": 5}, "output": {"status": "failed"}, "note": "Gives up after five tries.",
+     "danger": [{"kind": "destructive", "note": "Deletes the queued form (app/retry.py:2)"}]},
+]
+
+
 async def fake_ask(**kwargs):
     """Claude, streaming a long answer over about 1.5 seconds; or a logic map or cross-references."""
+    if kwargs.get("system") == walkthrough.WALK_SYSTEM_PROMPT:
+        yield Event(kind="tool", text="Reading app/retry.py")
+        await asyncio.sleep(0.3)
+        if "These inputs are fixed" in kwargs["question"]:
+            body = {"steps": WALK_STEPS[:1], "outcome": {"kind": "stopped", "message": "Sent on the first try"}}
+        else:
+            body = {"inputs": WALK_INPUTS, "steps": WALK_STEPS, "outcome": {"kind": "exit", "message": "Reached exit: Give up"}}
+        yield Event(kind="done", text=f"```json\n{json.dumps(body)}\n```", session_id="e2e-walk")
+        return
     if kwargs.get("system") == logic.LOGIC_SYSTEM_PROMPT:
         yield Event(kind="tool", text="Reading docs/retry.md")
         await asyncio.sleep(0.3)
