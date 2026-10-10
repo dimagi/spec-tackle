@@ -381,8 +381,8 @@ def test_changed_lines_reports_additions_and_where_lines_were_deleted():
          z
     """))
     assert added == {2}
-    assert deleted == {2, 11}
-    assert calls.changed_lines(None) == (set(), set())
+    assert deleted == {2: ["b"], 11: ["y"]}
+    assert calls.changed_lines(None) == (set(), {})
 
 
 SOURCE = '''
@@ -424,9 +424,11 @@ SOURCE = '''
 
 
 def roots_for(tmp_path, added=(), deleted=(), new_file=False):
+    """`deleted` is positions (an indented statement was deleted there) or {position: rows}."""
     repo(tmp_path, {"m.py": SOURCE})
     index = calls.build_index(tmp_path)
-    return calls.roots(index, {"m.py": (set(added), set(deleted))}, {"m.py"} if new_file else set())
+    rows = deleted if isinstance(deleted, dict) else {p: ["        x = 1"] for p in deleted}
+    return calls.roots(index, {"m.py": (set(added), rows)}, {"m.py"} if new_file else set())
 
 
 def test_a_body_edit_changes_a_function(tmp_path):
@@ -442,13 +444,34 @@ def test_deleting_lines_inside_a_function_changes_it(tmp_path):
     assert roots_for(tmp_path, deleted=[16]) == {"m.py::deleted_from": {"change": "changed", "signatureChanged": False}}
 
 
+def test_deleting_the_last_lines_of_a_function_changes_it(tmp_path):
+    # Line 8 is the blank line after body_edit: the deleted rows sat at its end.
+    assert roots_for(tmp_path, deleted={8: ["    log(y)"]}) == {"m.py::body_edit": {"change": "changed", "signatureChanged": False}}
+
+
+def test_deleting_a_whole_function_changes_neither_neighbour(tmp_path):
+    # A function removed just before header_edit's decorator, and one removed after body_edit.
+    removed = ["def old():", "    pass", "", ""]
+    assert roots_for(tmp_path, deleted={10: removed, 8: ["", "", *removed]}) == {}
+
+
+def test_deleting_a_decorator_changes_the_signature(tmp_path):
+    assert roots_for(tmp_path, deleted={11: ["@cached"]}) == {"m.py::header_edit": {"change": "changed", "signatureChanged": True}}
+
+
+def test_deleting_a_method_changes_its_class(tmp_path):
+    # A method removed between kind = "home" and save(): it sat where save starts.
+    got = roots_for(tmp_path, deleted={22: ["    def old(self):", "        pass", ""]})
+    assert got == {"m.py::Visit": {"change": "changed", "signatureChanged": False}}
+
+
 def test_a_function_whose_lines_are_all_added_is_added(tmp_path):
     # A new function has no old callers to break, so its signature isn't "changed".
     assert roots_for(tmp_path, added=[5, 6, 7]) == {"m.py::body_edit": {"change": "added", "signatureChanged": False}}
 
 
 def test_a_function_rewritten_line_for_line_is_changed_not_added(tmp_path):
-    got = roots_for(tmp_path, added=[5, 6, 7], deleted=[5])
+    got = roots_for(tmp_path, added=[5, 6, 7], deleted={5: ["def body_edit(y):", "    return y"]})
     assert got == {"m.py::body_edit": {"change": "changed", "signatureChanged": True}}
 
 
@@ -598,3 +621,35 @@ def test_a_file_too_large_to_analyse_says_so(tmp_path, monkeypatch):
     repo(tmp_path, {"big.py": "def f():\n    return 1\n"})
     tree = calls.analyse(tmp_path, [{"filename": "big.py", "status": "added", "patch": "@@ -0,0 +1 @@\n+def f():"}])
     assert tree["other"] == [{"path": "big.py", "reason": "too large"}]
+
+
+def test_a_removed_function_flags_no_callers_in_analyse(tmp_path):
+    repo(tmp_path, {"m.py": "def a():\n    pass\n\n\ndef b():\n    pass\n\n\ndef c():\n    b()\n"})
+    files = [{"filename": "m.py", "status": "modified",
+              "patch": "@@ -3,8 +3,4 @@\n \n \n-def old():\n-    pass\n-\n-\n def b():\n     pass"}]
+    tree = calls.analyse(tmp_path, files)
+    assert tree["nodes"] == [] and tree["edges"] == []
+
+
+def test_a_stdlib_import_never_resolves_into_a_repo_package(tmp_path):
+    repo(tmp_path, {
+        "core/__init__.py": "",
+        "core/logging.py": "def getLogger():\n    pass\n",
+        "app.py": "import logging\n\ndef go():\n    logging.getLogger()\n",
+    })
+    assert edges(tmp_path) == set()
+    assert calls.build_index(tmp_path).find_module("logging") is None
+
+
+def test_one_pathological_file_is_skipped_rather_than_failing_the_tree(tmp_path):
+    deep = "x = " + " + ".join(["1"] * 30000) + "\n"
+    elifs = "def f(x):\n    if x == 0:\n        pass\n" + "".join(f"    elif x == {i}:\n        pass\n" for i in range(1, 3000))
+    repo(tmp_path, {"deep.py": deep, "elifs.py": elifs, "ok.py": "def ok():\n    pass\n"})
+    index = calls.build_index(tmp_path)
+    assert "ok.py" in index.modules and "elifs.py::f" in index.defs
+    assert {s["path"] for s in index.skipped} == {"deep.py"}
+
+
+def test_base_classes_that_point_at_each_other_do_not_recurse_forever(tmp_path):
+    repo(tmp_path, {"m.py": "class A(B.Inner):\n    def go(self):\n        self.missing()\n\nclass B(A.Inner):\n    pass\n"})
+    calls.resolve_edges(calls.build_index(tmp_path))  # no RecursionError

@@ -67,7 +67,10 @@ For every file:
 
 An import is resolved to a repo file by **suffix match** on the module path, so
 `from spec_tackle.render import x` finds `src/spec_tackle/render.py` without knowing
-the source root. An import that matches more than one file, or none, is dropped.
+the source root. The part of the path left over must not be a package (have no
+`__init__.py`), so `import logging` never means `core/logging.py`. An import that
+matches more than one file is dropped, unless exactly one of them matches the whole
+path from the repo root. A file too deeply nested to parse is skipped like a syntax error.
 
 ### 2. Resolve calls
 
@@ -94,8 +97,11 @@ caller.
 
 ### 3. Pick the roots
 
-Changed lines come from the PR's diff, exactly as in `run_logic` (`render.parse_patch`
-on each file's patch, right-hand side). A definition is:
+Changed lines come from the PR's diff, right-hand side. Deleted lines count too, at the
+line they sat before, for the definition they came out of: inside its span; at its first
+line only if they were its decorator or its old `def` line; just past its last line only
+if they were indented as its body. So deleting a whole function doesn't mark the next one
+changed. A definition is:
 
 - **added** when its whole span is added lines, or its file is new;
 - **changed** when any line in its span is added or modified;

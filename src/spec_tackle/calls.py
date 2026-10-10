@@ -58,11 +58,15 @@ class Index:
     def find_module(self, dotted: str) -> Module | None:
         """The repo module a dotted name means, matched on the end of its path; None when unsure."""
         if self._suffixes is None:
+            # A module is reachable by the end of its name only past a directory that isn't a
+            # package (a source root such as src/): `logging` never means core/logging.py.
+            packages = {m.name for m in self.modules.values() if m.path.endswith("__init__.py")}
             self._suffixes = {}
             for m in self.modules.values():
                 parts = m.name.split(".")
                 for i in range(len(parts)):
-                    self._suffixes.setdefault(".".join(parts[i:]), []).append(m)
+                    if i == 0 or ".".join(parts[:i]) not in packages:
+                        self._suffixes.setdefault(".".join(parts[i:]), []).append(m)
         found = self._suffixes.get(dotted, [])
         if len(found) == 1:
             return found[0]
@@ -111,17 +115,20 @@ def build_index(root: Path, max_files: int | None = None, max_bytes: int | None 
             continue
         try:
             tree = ast.parse(file.read_text("utf-8", "replace"), filename=path)
+            name = module_name(path)
+            package = name if path.endswith("__init__.py") else name.rpartition(".")[0]
+            module = Module(path=path, name=name, package=package, tree=tree)
+            _read_imports(module)
+            _read_defs(module, tree.body)
         except SyntaxError as exc:
             index.skipped.append({"path": path, "reason": f"syntax error: line {exc.lineno}: {exc.msg}"})
             continue
         except ValueError as exc:  # e.g. null bytes
             index.skipped.append({"path": path, "reason": f"syntax error: {exc}"})
             continue
-        name = module_name(path)
-        package = name if path.endswith("__init__.py") else name.rpartition(".")[0]
-        module = Module(path=path, name=name, package=package, tree=tree)
-        _read_imports(module)
-        _read_defs(module, tree.body, prefix="", parent=None, parent_kind=None)
+        except (RecursionError, MemoryError):  # e.g. a generated expression thousands of terms long
+            index.skipped.append({"path": path, "reason": "too complex"})
+            continue
         index.modules[path] = module
         for d in module.defs.values():
             index.defs[d.id] = d
@@ -165,8 +172,15 @@ def _absolute(module: Module, name: str | None, level: int) -> str | None:
     return ".".join([*base, *([name] if name else [])])
 
 
-def _read_defs(module: Module, body: list[ast.stmt], prefix: str, parent: str | None, parent_kind: str | None) -> None:
-    for node in body:
+def _read_defs(module: Module, body: list[ast.stmt]) -> None:
+    # An explicit stack, in source order: an elif chain nests one level per branch.
+    stack = [(iter(body), "", None, None)]
+    while stack:
+        nodes, prefix, parent, parent_kind = stack[-1]
+        node = next(nodes, None)
+        if node is None:
+            stack.pop()
+            continue
         if isinstance(node, _DEF):
             qual = prefix + node.name
             if qual in module.defs:  # a second, conditional definition: the first wins
@@ -183,11 +197,11 @@ def _read_defs(module: Module, body: list[ast.stmt], prefix: str, parent: str | 
             )
             module.defs[qual] = definition
             inner = f"{qual}." if kind == "class" else f"{qual}.<locals>."
-            _read_defs(module, node.body, inner, definition.id, kind)
+            stack.append((iter(node.body), inner, definition.id, kind))
         else:
             # Definitions under `if`, `try`, `with` and loops still count.
-            for block in _blocks(node):
-                _read_defs(module, block, prefix, parent, parent_kind)
+            for block in reversed(_blocks(node)):
+                stack.append((iter(block), prefix, parent, parent_kind))
 
 
 def _blocks(node: ast.stmt) -> list[list[ast.stmt]]:
@@ -223,7 +237,11 @@ def resolve_edges(index: Index) -> list[Edge]:
 
     for module in index.modules.values():
         for d in module.defs.values():
-            for callee, kind, line in resolver.uses(module, d):
+            try:
+                uses = list(resolver.uses(module, d))
+            except RecursionError:  # a pathological definition loses its edges, not the whole tree
+                continue
+            for callee, kind, line in uses:
                 add(d, callee, kind, line)
     return [Edge(caller, callee, kind, tuple(sorted(lines))) for (caller, callee), (kind, lines) in found.items()]
 
@@ -231,6 +249,7 @@ def resolve_edges(index: Index) -> list[Edge]:
 class _Resolver:
     def __init__(self, index: Index):
         self.index = index
+        self._active: set[tuple] = set()
         self.methods: dict[str, list[Definition]] = {}
         for d in index.defs.values():
             name = d.qualname.rpartition(".")[2]
@@ -309,9 +328,19 @@ class _Resolver:
     def _member(self, cls: Definition, name: str, skip_self: bool = False, seen=None) -> Definition | None:
         """`name` on a class or, in order, its repo base classes."""
         seen = seen or set()
-        if cls.id in seen:
+        # Bases written `Other.Inner` resolve through _expr, which starts afresh: `_active`
+        # stops classes whose bases point at each other from looping.
+        key = (cls.id, name, skip_self)
+        if cls.id in seen or key in self._active:
             return None
         seen.add(cls.id)
+        self._active.add(key)
+        try:
+            return self._find_member(cls, name, skip_self, seen)
+        finally:
+            self._active.discard(key)
+
+    def _find_member(self, cls: Definition, name: str, skip_self: bool, seen: set) -> Definition | None:
         module = self.index.modules[cls.path]
         if not skip_self:
             found = module.defs.get(f"{cls.qualname}.{name}")
@@ -391,10 +420,10 @@ def is_test_path(path: str) -> bool:
     return any(p.search(path) for p in _TEST_PATHS)
 
 
-def changed_lines(patch: str | None) -> tuple[set[int], set[int]]:
-    """(lines the patch adds, new-side lines that deleted lines sat just before)."""
+def changed_lines(patch: str | None) -> tuple[set[int], dict[int, list[str]]]:
+    """(lines the patch adds, {new-side line: the deleted rows that sat just before it})."""
     added: set[int] = set()
-    deleted: set[int] = set()
+    deleted: dict[int, list[str]] = {}
     line = 0
     for row in (patch or "").splitlines():
         hunk = _HUNK.match(row)
@@ -404,10 +433,47 @@ def changed_lines(patch: str | None) -> tuple[set[int], set[int]]:
             added.add(line)
             line += 1
         elif row.startswith("-"):
-            deleted.add(line)
+            deleted.setdefault(line, []).append(row[1:])
         elif row.startswith(" "):
             line += 1
     return added, deleted
+
+
+def _indent(row: str) -> int:
+    return len(row) - len(row.lstrip())
+
+
+def _deleted_from(d: Definition, at: int, rows: list[str]) -> bool:
+    """True when rows deleted just before line `at` were part of definition `d`.
+
+    Inside its span, they were. At its first line, only if they were its decorator or its
+    old `def` line; just past its last line, only if they were indented as its body. So a
+    whole function deleted next to another doesn't count against its neighbour.
+    """
+    text = [r for r in rows if r.strip()]
+    if d.start < at <= d.end:
+        return True
+    if not text:
+        return False
+    indent = d.node.col_offset
+    if at == d.start:
+        name = re.escape(d.qualname.rpartition(".")[2])
+        old_header = re.compile(rf"(async\s+def|def|class)\s+{name}\b")
+        last = text[-1]
+        return (last.lstrip().startswith("@") and _indent(last) == indent) or any(
+            _indent(r) == indent and old_header.match(r.lstrip()) for r in text
+        )
+    return at == d.end + 1 and _indent(text[0]) > indent
+
+
+def _deletion_owners(module: Module, deleted: dict[int, list[str]]) -> dict[int, Definition]:
+    """Each deletion's definition: the innermost one it came out of."""
+    owners = {}
+    for at, rows in deleted.items():
+        holding = [d for d in module.defs.values() if _deleted_from(d, at, rows)]
+        if holding:
+            owners[at] = min(holding, key=lambda d: d.end - d.start)
+    return owners
 
 
 def _own_lines(index: Index, d: Definition) -> set[int]:
@@ -420,19 +486,25 @@ def _own_lines(index: Index, d: Definition) -> set[int]:
     return lines
 
 
-def roots(index: Index, changes: dict[str, tuple[set[int], set[int]]], added_files: set[str]) -> dict[str, dict]:
+def roots(
+    index: Index, changes: dict[str, tuple[set[int], dict[int, list[str]]]], added_files: set[str],
+) -> dict[str, dict]:
     """The definitions the PR adds or changes: id -> {change, signatureChanged}."""
     found: dict[str, dict] = {}
     for path, (added, deleted) in changes.items():
         module = index.modules.get(path)
         if module is None:
             continue
+        owners = _deletion_owners(module, deleted)
         for d in module.defs.values():
             span = set(range(d.start, d.end + 1))
-            if path in added_files or (span <= added and not span & deleted):
+            # A function also owns what was deleted from its nested functions; a class only its own.
+            mine = {at for at, o in owners.items()
+                    if o is d or (d.kind != "class" and d.start <= o.start and o.end <= d.end)}
+            if path in added_files or (span <= added and not mine):
                 found[d.id] = {"change": "added", "signatureChanged": False}
                 continue
-            touched = _own_lines(index, d) & (added | deleted)
+            touched = (_own_lines(index, d) & added) | mine
             if touched:
                 header = set(range(d.header[0], d.header[1] + 1))
                 found[d.id] = {"change": "changed", "signatureChanged": bool(touched & header)}
@@ -538,7 +610,7 @@ def _owner(index: Index, d: Definition) -> Definition:
     return functions[-1] if functions else d
 
 
-def _other(index: Index, files: list[dict], changes: dict[str, tuple[set[int], set[int]]]) -> list[dict]:
+def _other(index: Index, files: list[dict], changes: dict[str, tuple[set[int], dict[int, list[str]]]]) -> list[dict]:
     skipped = {s["path"]: "too large" if s["reason"] == "too large" else "syntax error" for s in index.skipped}
     other = []
     for f in files:
@@ -551,7 +623,8 @@ def _other(index: Index, files: list[dict], changes: dict[str, tuple[set[int], s
             other.append({"path": path, "reason": skipped[path]})
         elif path in index.modules:
             added, deleted = changes[path]
-            inside = set().union(*(range(d.start, d.end + 1) for d in index.modules[path].defs.values()))
-            if (added | deleted) - inside:
+            module = index.modules[path]
+            inside = set().union(*(range(d.start, d.end + 1) for d in module.defs.values()))
+            if added - inside or set(deleted) - set(_deletion_owners(module, deleted)):
                 other.append({"path": path, "reason": "module level"})
     return other
