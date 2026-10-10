@@ -7,7 +7,7 @@ test.beforeEach(async ({ request }) => {
 
 test("the call tree shows a changed function, the caller it breaks, and its code", async ({ page }) => {
   await page.goto("/pr/o/r/7");
-  await page.getByRole("tab", { name: "Logic view" }).click();
+  await page.getByRole("tab", { name: "Visualize" }).click();
   await page.getByRole("tab", { name: "Calls" }).click();
   await expect(page).toHaveURL(/\?view=logic&mode=calls$/);
 
@@ -28,6 +28,6 @@ test("the call tree shows a changed function, the caller it breaks, and its code
   await expect(page.locator(".line-flash")).toContainText("def backoff(tries, base):");
 
   // Back to Logic: still on Calls.
-  await page.getByRole("tab", { name: "Logic view" }).click();
+  await page.getByRole("tab", { name: "Visualize" }).click();
   await expect(page.getByRole("tab", { name: "Calls" })).toHaveAttribute("aria-selected", "true");
 });

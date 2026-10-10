@@ -54,7 +54,7 @@ test("with Claude, the Logic tab swaps views and the review page keeps its state
   const box = document.querySelector<HTMLTextAreaElement>("#conversation textarea")!;
   await userEvent.type(box, "Half a thought");
 
-  await userEvent.click(within(tabs).getByRole("tab", { name: "Logic view" }));
+  await userEvent.click(within(tabs).getByRole("tab", { name: "Visualize" }));
   expect(router.state.location.search).toBe("?view=logic");
   expect(await screen.findByRole("button", { name: "Generate logic map" })).toBeVisible();
   expect(document.getElementById("doc")).not.toBeVisible();
@@ -69,7 +69,7 @@ test("without Claude, a PR with Python changes still gets the Logic tab, opening
   localStorage.clear();
   const router = renderReview(makePage({ claude: false, files: [makeFile(), makeFile({ path: "app/retry.py", markdown: false })] }));
   const tabs = await screen.findByRole("tablist");
-  await userEvent.click(within(tabs).getByRole("tab", { name: "Logic view" }));
+  await userEvent.click(within(tabs).getByRole("tab", { name: "Visualize" }));
   expect(router.state.location.search).toBe("?view=logic");
   expect(await screen.findByRole("tab", { name: "Calls" })).toHaveAttribute("aria-selected", "true");
   expect(await screen.findByText("This PR changes no Python functions.")).toBeInTheDocument();

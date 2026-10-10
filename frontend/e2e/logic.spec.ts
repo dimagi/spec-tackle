@@ -16,7 +16,7 @@ test.beforeEach(async ({ request }) => {
 
 test("generate a logic map, expand it, open a function and jump to it in Review", async ({ page }) => {
   await page.goto("/pr/o/r/7");
-  await page.getByRole("tab", { name: "Logic view" }).click();
+  await page.getByRole("tab", { name: "Visualize" }).click();
   await expect(page).toHaveURL(/\?view=logic$/);
 
   await page.getByRole("button", { name: "Generate logic map" }).click();
@@ -47,7 +47,7 @@ test("generate a logic map, expand it, open a function and jump to it in Review"
   await expect(page.locator('section.file[data-path="docs/retry.md"] .view[data-view="rendered"]')).toBeVisible();
 
   // Back to Logic: the map and the expanded block are still there.
-  await page.getByRole("tab", { name: "Logic view" }).click();
+  await page.getByRole("tab", { name: "Visualize" }).click();
   await expect(chart.getByRole("button", { name: /⊖ Retry failures/ })).toBeVisible();
 });
 

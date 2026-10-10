@@ -42,7 +42,7 @@ export function LogicView({ pr, head, onShowInReview, claude = true, python = fa
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-8 lg:px-8">
       <div className="mb-5 flex">
-        <div className="flex rounded-lg bg-stone-200/70 p-0.5 text-xs font-medium dark:bg-stone-800" role="tablist" aria-label="Logic view mode">
+        <div className="flex rounded-lg bg-stone-200/70 p-0.5 text-xs font-medium dark:bg-stone-800" role="tablist" aria-label="Visualize mode">
           <button type="button" role="tab" aria-selected={mode === "flow"} className={`seg ${mode === "flow" ? "on" : ""}`} onClick={() => setMode("flow")}>
             Flow
           </button>
@@ -139,7 +139,7 @@ function FlowView({ pr, head: pageHead, onShowInReview, python, onShowCalls }: F
   };
 
   if (!logic.data) {
-    if (logic.error) return <Card tone="error">Couldn't load the Logic view: {(logic.error as Error).message}</Card>;
+    if (logic.error) return <Card tone="error">Couldn't load the flowchart: {(logic.error as Error).message}</Card>;
     return <div className="py-16 text-center text-sm text-stone-500">Loading…</div>;
   }
   const { available, map, stale } = logic.data;
