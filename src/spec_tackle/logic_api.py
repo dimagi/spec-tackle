@@ -11,6 +11,7 @@ from . import claude, logic, render
 from .checkout import CheckoutError, CommitGone
 from .claude_api import _signed_in
 from .github import GitHubError, PRRef
+from .turns import Busy
 
 router = APIRouter()
 
@@ -166,12 +167,15 @@ async def generate(request: Request, owner: str, repo: str, number: int):
     if not state.turns.running(key):
         _last_errors.pop(key, None)
         token = await state.session.token()
-        state.turns.start(
-            thread_id=key,
-            work=lambda emit: run_logic(
-                state=state, client=client, token=token, login=login, pr=pr, overview=overview, emit=emit
-            ),
-        )
+        try:
+            state.turns.start(
+                thread_id=key,
+                work=lambda emit: run_logic(
+                    state=state, client=client, token=token, login=login, pr=pr, overview=overview, emit=emit
+                ),
+            )
+        except Busy:  # another post started it while we awaited the token: join that run
+            pass
     return {**_state(state=state, login=login, pr=pr, head=sha), "head": sha}
 
 

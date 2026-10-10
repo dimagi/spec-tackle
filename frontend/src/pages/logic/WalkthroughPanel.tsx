@@ -13,6 +13,8 @@ type Props = {
   onStep: (n: number) => void;
   onShowCode: (block: LogicBlock) => void;
   onClose: () => void;
+  /** False while the panel is kept mounted but hidden: it must not react to the keyboard. */
+  active?: boolean;
 };
 
 const ICON: Record<LogicBlock["kind"], string> = { entry: "▶", step: "▸", decision: "◇", loop: "↻", async: "⚡", exit: "■" };
@@ -20,14 +22,14 @@ const show = (v: unknown) => JSON.stringify(v, null, 2);
 const valuesOf = (inputs: WalkInput[]) => Object.fromEntries(inputs.map((i) => [i.name, i.value]));
 
 /** The walkthrough beside the Logic map: pick an entry, set its inputs, step through the trace. */
-export function WalkthroughPanel({ entries, entry, onEntry, blocks, walk, step, onStep, onShowCode, onClose }: Props) {
+export function WalkthroughPanel({ entries, entry, onEntry, blocks, walk, step, onStep, onShowCode, onClose, active = true }: Props) {
   const { data, progress, error, posting } = walk;
   const trace = data?.trace ?? null;
   const starting = data?.starting ?? null;
   const last = trace ? trace.steps.length - 1 : 0;
 
   useEffect(() => {
-    if (!trace) return;
+    if (!trace || !active) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (e.altKey || e.ctrlKey || e.metaKey || t?.closest("input, textarea, select, [contenteditable]")) return;
@@ -36,13 +38,13 @@ export function WalkthroughPanel({ entries, entry, onEntry, blocks, walk, step, 
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [trace, step, last, onStep]);
+  }, [trace, step, last, onStep, active]);
 
   const flagged = trace ? dangerSteps(trace.steps) : [];
   const current = trace?.steps[step];
 
   return (
-    <aside aria-label="Walkthrough"
+    <aside aria-label="Walkthrough" hidden={!active}
       className="sticky top-20 max-h-[calc(100vh-6rem)] w-[40%] shrink-0 overflow-y-auto rounded-xl border border-stone-200 bg-white shadow-sm dark:border-stone-800 dark:bg-stone-900">
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-stone-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-stone-800 dark:bg-stone-900/95">
         <h2 className="flex-1 text-sm font-semibold">Walkthrough</h2>
@@ -86,7 +88,7 @@ export function WalkthroughPanel({ entries, entry, onEntry, blocks, walk, step, 
         <div className="m-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
           <p>{error}</p>
           <button type="button" className="mt-2 font-semibold underline" disabled={posting}
-            onClick={() => walk.run(starting ? valuesOf(trace?.inputs ?? starting) : undefined)}>Try again</button>
+            onClick={() => void walk.retry()}>Try again</button>
         </div>
       )}
 

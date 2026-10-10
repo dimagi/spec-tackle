@@ -368,6 +368,44 @@ test("Show code opens the function panel, and Back returns to the same step", as
   expect(await screen.findByText("Step 2 of 3")).toBeInTheDocument();
 });
 
+test("clicking a visited block while the function panel is open jumps to its step and closes the panel", async () => {
+  setup(vi.fn(), "start");
+  const panel = await screen.findByRole("complementary", { name: "Walkthrough" });
+  await within(panel).findByText("Step 1 of 3");
+  await userEvent.click(within(panel).getByRole("button", { name: /Next/ }));
+  await userEvent.click(within(panel).getByRole("button", { name: /Next/ }));
+  await userEvent.click(within(panel).getByRole("button", { name: /Show code/ }));
+  const code = await screen.findByRole("complementary", { name: /^(?!Walkthrough)/ });
+  await userEvent.click(await node(/^Store the visit/));
+  expect(code).not.toBeInTheDocument();
+  expect(await screen.findByText("Step 2 of 3")).toBeInTheDocument();
+  expect(screen.getByRole("complementary", { name: "Walkthrough" })).toBeInTheDocument();
+});
+
+test("Escape while typing in an input does not close the walkthrough", async () => {
+  setup(vi.fn(), "start");
+  const panel = await screen.findByRole("complementary", { name: "Walkthrough" });
+  await userEvent.click(await within(panel).findByRole("button", { name: /^Inputs/ }));
+  await userEvent.click(within(panel).getAllByRole("textbox")[0]);
+  await userEvent.keyboard("{Escape}");
+  expect(screen.getByRole("complementary", { name: "Walkthrough" })).toBeInTheDocument();
+});
+
+test("edited inputs survive Show code and Back", async () => {
+  setup(vi.fn(), "start");
+  const panel = await screen.findByRole("complementary", { name: "Walkthrough" });
+  await userEvent.click(await within(panel).findByRole("button", { name: /^Inputs/ }));
+  const field = within(panel).getAllByRole("textbox")[0];
+  await userEvent.type(field, "999");
+  const edited = (field as HTMLTextAreaElement).value;
+  await userEvent.click(within(panel).getByRole("button", { name: /Show code/ }));
+  const code = await screen.findByRole("complementary", { name: /Form is submitted|Store the visit/ });
+  expect(screen.queryByRole("complementary", { name: "Walkthrough" })).toBeNull(); // hidden
+  await userEvent.click(within(code).getByRole("button", { name: /Back to walkthrough/ }));
+  const again = await screen.findByRole("complementary", { name: "Walkthrough" });
+  expect((within(again).getAllByRole("textbox")[0] as HTMLTextAreaElement).value).toBe(edited);
+});
+
 test("an unknown ?walk= entry falls back to the first entry", async () => {
   setup(vi.fn(), "gone");
   const panel = await screen.findByRole("complementary", { name: "Walkthrough" });

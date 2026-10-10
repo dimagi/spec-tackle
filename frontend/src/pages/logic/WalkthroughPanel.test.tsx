@@ -27,7 +27,7 @@ const TRACE: Trace = {
 function walkRun(over: Partial<WalkRun> = {}, data: Partial<WalkState> = {}): WalkRun {
   return {
     data: { trace: TRACE, starting: STARTING, running: false, error: null, ...data },
-    loadError: null, progress: null, error: null, posting: false, run: vi.fn(async () => {}), ...over,
+    loadError: null, progress: null, error: null, posting: false, run: vi.fn(async () => {}), retry: vi.fn(async () => {}), ...over,
   };
 }
 
@@ -61,7 +61,8 @@ test("failure shows the error and Try again", async () => {
   render(<Harness walk={walk} />);
   expect(screen.getByText(/didn't pass validation/)).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-  expect(walk.run).toHaveBeenCalledWith({ body: { status: "final" }, user: { id: 12 } });
+  expect(walk.retry).toHaveBeenCalledTimes(1);
+  expect(walk.run).not.toHaveBeenCalled();
 });
 
 test("stepping with buttons and arrow keys, ignoring keys while typing", async () => {

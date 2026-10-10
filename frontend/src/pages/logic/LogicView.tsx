@@ -208,7 +208,7 @@ function MapView({ pr, map, walk, onWalk, onShowInReview }: {
       setOpen(next);
     } else {
       const at = trace && !block.children?.length ? stepForBlock(steps, block.id, reached) : null;
-      if (at !== null) goTo(at);
+      if (at !== null) { goTo(at); setSelected(null); }
       else setSelected(block);
     }
   };
@@ -217,6 +217,8 @@ function MapView({ pr, map, walk, onWalk, onShowInReview }: {
     if (!selected && entry === null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Escape while typing is for the field, not for closing panels.
+      if ((e.target as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable]")) return;
       if (selected) setSelected(null);
       else onWalk(null);
     };
@@ -257,13 +259,16 @@ function MapView({ pr, map, walk, onWalk, onShowInReview }: {
           </Suspense>
         )}
       </div>
-      {selected ? (
+      {selected && (
         <FunctionPanel pr={pr} mapId={map.id} block={selected} headSha={map.headSha}
           onClose={() => setSelected(null)} onShowInReview={onShowInReview}
           onBack={entry !== null ? () => setSelected(null) : undefined} />
-      ) : entry !== null && (
+      )}
+      {/* Kept mounted (hidden) under the function panel, so edited inputs survive Show code. */}
+      {entry !== null && (
         <WalkthroughPanel entries={entryList} entry={entry} onEntry={(id) => onWalk(id)} blocks={byId}
-          walk={walkRun} step={step} onStep={goTo} onShowCode={setSelected} onClose={() => onWalk(null)} />
+          walk={walkRun} step={step} onStep={goTo} onShowCode={setSelected} onClose={() => onWalk(null)}
+          active={!selected} />
       )}
     </div>
   );

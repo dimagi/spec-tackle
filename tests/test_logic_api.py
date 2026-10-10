@@ -163,3 +163,15 @@ def test_a_failure_nobody_watched_is_reported_until_the_next_run(claude_app):
     claude_app.post(LOGIC)
     assert claude_app.get(LOGIC, params={"head": "abc1234"}).json()["error"] is None
     assert _wait(claude_app)["error"] is None
+
+
+def test_a_generate_that_loses_the_start_race_joins_the_other(claude_app, monkeypatch):
+    from spec_tackle.app import app
+    from spec_tackle.turns import Busy
+
+    def busy(**kwargs):
+        raise Busy(kwargs["thread_id"])
+
+    monkeypatch.setattr(app.state.turns, "start", busy)
+    response = claude_app.post(LOGIC)
+    assert response.status_code == 200 and response.json()["map"] is None

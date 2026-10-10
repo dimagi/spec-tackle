@@ -12,6 +12,8 @@ export type WalkRun = {
   error: string | null;
   posting: boolean;
   run: (inputs?: Record<string, unknown>) => Promise<void>;
+  /** Run again with the inputs of this entry's last run (none: propose), e.g. after a failure. */
+  retry: () => Promise<void>;
 };
 
 /** One entry's walkthrough: its state, a run (proposing without inputs), and the run's progress. */
@@ -40,9 +42,13 @@ export function useWalk(mapId: string, entry: string | null): WalkRun {
 
   useEffect(() => { setProgressState(null); setErrorState(null); }, [mapId, entry]);
 
+  // What each entry's last run was asked to do, so Try again resends the values that failed.
+  const lastInputs = useRef(new Map<string, Record<string, unknown> | undefined>());
+
   const run = async (inputs?: Record<string, unknown>) => {
     if (!entry) return;
     const key = currentKey;
+    lastInputs.current.set(key, inputs);
     noRejoin.current.delete(key);
     setErrorFor(key, null);
     setPostingKey(key);
@@ -109,5 +115,6 @@ export function useWalk(mapId: string, entry: string | null): WalkRun {
     error: progress ? null : localError ?? data?.error ?? null,
     posting,
     run,
+    retry: () => run(lastInputs.current.get(currentKey)),
   };
 }

@@ -102,3 +102,21 @@ test("switching entries mid-run does not leak the old entry's run", async () => 
   expect(result.current.posting).toBe(false);
   expect(FakeEventSource.instances.filter((s) => s.url.includes("entry=job"))).toHaveLength(0);
 });
+
+test("retry resends the inputs of the last run, even when it failed", async () => {
+  current = { ...empty, starting: [{ name: "a", description: "d", value: 1 }] };
+  const { result } = renderHook(() => useWalk("m1", "send"), { wrapper });
+  await waitFor(() => expect(result.current.data).toBeDefined());
+  const base = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      posts.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+    }
+    return base(url, init);
+  }));
+  await act(() => result.current.run({ a: 5 }));
+  await waitFor(() => expect(result.current.error).toBeTruthy());
+  await act(() => result.current.retry());
+  expect(posts).toEqual([{ entry: "send", inputs: { a: 5 } }, { entry: "send", inputs: { a: 5 } }]);
+});

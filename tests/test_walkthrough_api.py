@@ -9,6 +9,7 @@ import pytest
 from spec_tackle import claude, walkthrough
 from spec_tackle.app import app
 from spec_tackle.github import PRRef
+from spec_tackle.turns import Busy
 
 BLOCKS = [
     {"id": "send", "label": "Form is sent", "kind": "entry", "change": "unchanged", "next": [{"to": "retry"}]},
@@ -181,6 +182,52 @@ def test_a_second_post_joins_the_running_one(walk):
     assert walk.post(walk.url, json={"entry": "send"}).json()["running"] is True
     _wait(walk)
     assert len(walk.fake_ask.calls) == 1
+
+
+def test_a_failed_fixed_run_is_cleared_by_posting_cached_values(walk):
+    first = _propose(walk)["trace"]
+    walk.fake_ask.answers = [BAD, BAD, BAD, BAD]
+    for _ in range(2):
+        walk.post(walk.url, json={"entry": "send", "inputs": {"form": {"id": 8}}})
+        assert _wait(walk)["error"].startswith("Claude's walkthrough didn't pass validation:")
+    back = walk.post(walk.url, json={"entry": "send", "inputs": {"form": {"id": 7}}}).json()
+    assert back["trace"]["id"] == first["id"] and back["error"] is None
+    assert walk.get(walk.url, params={"entry": "send"}).json()["error"] is None
+
+
+def test_a_proposing_cache_hit_clears_an_old_error(walk):
+    _propose(walk)
+    walk.fake_ask.answers = [BAD, BAD]
+    walk.post(walk.url, json={"entry": "send", "inputs": {"form": {"id": 8}}})
+    assert _wait(walk)["error"]
+    assert walk.post(walk.url, json={"entry": "send"}).json()["error"] is None
+
+
+def test_whole_number_floats_still_hit_the_proposed_trace(walk):
+    answer = {"inputs": [{"name": "n", "description": "d", "value": 1.0}], "steps": STEPS, "outcome": OUTCOME}
+    walk.fake_ask.answers = [f"```json\n{json.dumps(answer)}\n```"]
+    walk.post(walk.url, json={"entry": "send"})
+    first = _wait(walk)["trace"]
+    hit = walk.post(walk.url, json={"entry": "send", "inputs": {"n": 1}}).json()
+    assert hit["running"] is False and hit["trace"]["id"] == first["id"]
+    assert len(walk.fake_ask.calls) == 1
+
+
+def test_posted_values_have_a_size_limit(walk):
+    _propose(walk)
+    big = "x" * (walkthrough.MAX_VALUE_BYTES + 1)
+    assert walk.post(walk.url, json={"entry": "send", "inputs": {"form": big}}).status_code == 400
+    wide = "é" * (walkthrough.MAX_VALUE_BYTES // 2)  # under the limit in characters, over in bytes
+    assert walk.post(walk.url, json={"entry": "send", "inputs": {"form": wide}}).status_code == 400
+
+
+def test_a_post_that_loses_the_start_race_joins_the_other(walk, monkeypatch):
+    def busy(**kwargs):
+        raise Busy(kwargs["thread_id"])
+
+    monkeypatch.setattr(app.state.turns, "start", busy)
+    response = walk.post(walk.url, json={"entry": "send"})
+    assert response.status_code == 200 and response.json()["trace"] is None
 
 
 def test_events_with_nothing_running_end_at_once(walk):

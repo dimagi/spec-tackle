@@ -20,6 +20,7 @@ from .checkout import CheckoutError, CommitGone
 from .claude_api import _signed_in
 from .github import GitHubError, PRRef
 from .logic_api import ask_json, pr_snapshot
+from .turns import Busy
 
 router = APIRouter()
 
@@ -137,25 +138,37 @@ async def walk_run(request: Request, map_id: str, body: WalkRequest):
             raise HTTPException(400, "This entry has no starting inputs yet")
         if set(body.inputs) != {i["name"] for i in proposed["inputs"]}:
             raise HTTPException(400, "The inputs must have the same names as the starting inputs")
-        cached = state.store.trace_by_hash(login=login, map_id=map_id, entry_id=body.entry,
-                                           input_hash=walkthrough.input_hash(body.inputs))
+        if any(not walkthrough._small(v) for v in body.inputs.values()):
+            raise HTTPException(400, f"Each input must be at most {walkthrough.MAX_VALUE_BYTES} bytes of JSON")
+        # Python equality treats 1 and 1.0 alike (the browser sends 1, Claude may have said 1.0),
+        # but their hashes differ: the proposed values are a hit before hashing.
+        if body.inputs == walkthrough.values_of(proposed["inputs"]):
+            cached = proposed
+        else:
+            cached = state.store.trace_by_hash(login=login, map_id=map_id, entry_id=body.entry,
+                                               input_hash=walkthrough.input_hash(body.inputs))
         if cached:
             state.store.touch_trace(trace_id=cached["id"])
+            _last_errors.pop(key, None)
             return _state(state=state, login=login, map_id=map_id, entry=body.entry)
         inputs = [{**i, "value": body.inputs[i["name"]]} for i in proposed["inputs"]]
     else:
         proposed = state.store.proposed_trace(login=login, map_id=map_id, entry_id=body.entry)
         if proposed:
             state.store.touch_trace(trace_id=proposed["id"])
+            _last_errors.pop(key, None)
             return _state(state=state, login=login, map_id=map_id, entry=body.entry)
 
     _last_errors.pop(key, None)
     token = await state.session.token()
-    state.turns.start(
-        thread_id=key,
-        work=lambda emit: run_walk(state=state, client=client, token=token, login=login, saved=saved,
-                                   entry=body.entry, inputs=inputs, emit=emit),
-    )
+    try:
+        state.turns.start(
+            thread_id=key,
+            work=lambda emit: run_walk(state=state, client=client, token=token, login=login, saved=saved,
+                                       entry=body.entry, inputs=inputs, emit=emit),
+        )
+    except Busy:  # another post started it while we awaited the token: join that run
+        pass
     return _state(state=state, login=login, map_id=map_id, entry=body.entry)
 
 
