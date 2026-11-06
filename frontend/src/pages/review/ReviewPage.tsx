@@ -1,9 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useBlocker, useNavigate, useParams, useSearchParams } from "react-router";
-import { activityKey, apiBase, claudeKey, useClaudeThreads, useLiveActivity, usePage } from "../../api/queries";
+import { activityKey, apiBase, claudeKey, draftsKey, useClaudeThreads, useDrafts, useLiveActivity, usePage } from "../../api/queries";
 import { ApiError, onSignedOut, request } from "../../api/request";
-import type { ClaudeThread, Comment, ConversationItem, MentionUser, Page, Thread } from "../../api/types";
+import type { ClaudeThread, Comment, ConversationItem, Draft, Drafts, MentionUser, Page, Thread } from "../../api/types";
 import { MentionsCtx, type Mentions } from "../../components/MentionTextarea";
 import { Toaster } from "../../components/Toaster";
 import { applyActivity, initialSeen, type SeenState } from "../../lib/activity";
@@ -186,6 +186,13 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   }, [blocker]);
 
   const openComposer = (target: ComposerTarget) => {
+    // While a draft is being re-attached, picking lines moves it there.
+    const moving = store.getState().reattaching;
+    if (moving) {
+      clearSelection();
+      void reattachDraft(moving, target);
+      return;
+    }
     if (!confirmDiscard()) return;
     composerDirty.current = false;
     clearSelection();
@@ -217,6 +224,95 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     }
   };
 
+  // Drafts: comments and replies kept locally until the review is submitted.
+  const draftsQuery = useDrafts(pr, page.drafts);
+  const refetchDrafts = draftsQuery.refetch;
+  const draftList = draftsQuery.data?.drafts ?? [];
+  useEffect(() => {
+    if (draftsQuery.error) toast(`Couldn't load your drafts: ${(draftsQuery.error as Error).message}`, { kind: "error" });
+  }, [draftsQuery.error]);
+  // New commits can leave a draft's lines holding other text: ask the server again.
+  const draftsHead = useRef(activity.headSha);
+  useEffect(() => {
+    if (!page.drafts || draftsHead.current === activity.headSha) return;
+    draftsHead.current = activity.headSha;
+    refetchDrafts();
+  }, [page.drafts, activity.headSha, refetchDrafts]);
+  const setDrafts = (change: (list: Draft[]) => Draft[]) =>
+    queryClient.setQueryData<Drafts>(draftsKey(pr), (d = { drafts: [], githubPending: 0 }) => ({ ...d, drafts: change(d.drafts) }));
+  const upsertDraft = (draft: Draft) =>
+    setDrafts((list) => (list.some((d) => d.id === draft.id) ? list.map((d) => (d.id === draft.id ? draft : d)) : [...list, draft]));
+  const draftUrl = (id: string) => `/api/drafts/${encodeURIComponent(id)}`;
+
+  const draftComment = async (body: string) => {
+    const c = store.getState().composer!;
+    try {
+      const draft = await request<Draft>("POST", `${api}/drafts`, { path: c.path, start: c.start, end: c.end, commit: renderedSha, body });
+      upsertDraft(draft);
+      closeComposer();
+      activate(draft.id);
+      toast("Added to your review. Only you can see it until you submit.");
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
+  const draftReply = async (thread: Thread, body: string) => {
+    try {
+      upsertDraft(await request<Draft>("POST", `${api}/drafts`, { threadId: thread.id, body }));
+      toast("Reply added to your review");
+    } catch (err) {
+      fail(err);
+      throw err;
+    }
+  };
+
+  const saveDraft = async (draft: Draft, body: string) => {
+    try {
+      upsertDraft(await request<Draft>("PATCH", draftUrl(draft.id), { body }));
+    } catch (err) {
+      fail(err);
+      refetchDrafts(); // it may have been sent or deleted from another tab
+      throw err;
+    }
+  };
+
+  const deleteDraft = async (draft: Draft) => {
+    if (!confirm("Delete this draft? This can't be undone.")) return;
+    try {
+      await request("DELETE", draftUrl(draft.id));
+      setDrafts((list) => list.filter((d) => d.id !== draft.id));
+      if (store.getState().active === draft.id) activate(null);
+    } catch (err) {
+      fail(err);
+      refetchDrafts();
+    }
+  };
+
+  const reattachDraft = async (draftId: string, target: ComposerTarget) => {
+    store.getState().setReattaching(null);
+    try {
+      upsertDraft(await request<Draft>("PATCH", draftUrl(draftId), { path: target.path, start: target.start, end: target.end, commit: renderedSha }));
+      activate(draftId);
+      toast("Draft moved");
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  // What submitting the review does with the drafts (the server decides the same way).
+  const threadIds = new Set(activity.threads.map((t) => t.id));
+  const orphanDrafts = draftList.filter((d) => d.kind === "reply" && !d.sent && !threadIds.has(d.threadId!));
+  const outdatedDrafts = draftList.filter((d) => d.outdated).length;
+  const reviewDrafts = {
+    sending: draftList.length - orphanDrafts.length - outdatedDrafts,
+    outdated: outdatedDrafts,
+    orphans: orphanDrafts,
+    githubPending: draftsQuery.data?.githubPending ?? 0,
+    onDelete: deleteDraft,
+  };
+
   const claudeThreads = useClaudeThreads(pr, page.claude);
   const claudeList = claudeThreads.data ?? [];
   const lives = useClaudeStreams(claudeList, () => claudeThreads.refetch());
@@ -233,6 +329,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
       const thread = await request<ClaudeThread>("POST", `${api}/claude/threads`, { path: c.path, start: c.start, end: c.end, commit: renderedSha, question });
       closeComposer();
       upsertClaude(thread);
+      // With Claude threads hidden, the answer would vanish along with the composer.
+      if (!store.getState().showClaude) store.getState().setShowClaude(true);
       activate(thread.id);
     } catch (err) {
       fail(err);
@@ -373,12 +471,20 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
 
   const submitReview = async (event: ReviewEvent, body: string) => {
     try {
-      const created = await request<Comment>("POST", `${api}/review`, { event, body });
-      markSeen(created.id);
-      toast(event === "APPROVE" ? "Approved ✓" : "Review submitted");
-      await live.refresh();
+      const { sent } = await request<{ sent: number; held: number }>("POST", `${api}/review`, { event, body });
+      const drafts = sent ? ` with ${sent} draft${sent > 1 ? "s" : ""}` : "";
+      toast(`${event === "APPROVE" ? "Approved ✓" : "Review submitted"}${drafts}`);
+      await Promise.all([live.refresh(), page.drafts && refetchDrafts()]);
     } catch (err) {
       fail(err);
+      // One draft was refused: show it, with the reason now on its card.
+      const failed = err instanceof ApiError && typeof err.data.draftId === "string" ? err.data.draftId : null;
+      if (page.drafts) await refetchDrafts();
+      if (failed) {
+        const draft = draftList.find((d) => d.id === failed);
+        setReviewOpen(false);
+        activate(draft?.kind === "reply" ? draft.threadId : failed, { scroll: true });
+      }
       throw err;
     }
   };
@@ -400,6 +506,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
   useKeyboard({
     step: (direction) => { if (onReview) step(direction); },
     escape: () => {
+      if (store.getState().reattaching) return store.getState().setReattaching(null);
       if (store.getState().enlarged) return store.getState().enlarge(null);
       if (store.getState().composer && !composerDirty.current) closeComposer();
       activate(null);
@@ -418,7 +525,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
     // A reference marker jumps to its target instead (see DocRefs).
     if (target.closest("a, button, summary, input, textarea, .doc-ref")) return;
     if (!getSelection()?.isCollapsed) return;
-    const anchor = target.closest(".has-thread, .has-claude");
+    // While re-attaching a draft, a click picks its new lines even where a thread already sits.
+    const anchor = store.getState().reattaching ? null : target.closest(".has-thread, .has-claude, .has-draft");
     const list = anchor ? engineRef.current?.threadsAt(anchor) ?? [] : [];
     if (list.length) {
       activate(list[(list.indexOf(active ?? "") + 1) % list.length]);
@@ -468,7 +576,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
         sync={{ fetching: live.fetching, error: live.error, lastSync: live.lastSync, signedOut }}
         newCommits={activity.headSha !== renderedSha}
         onRefresh={() => live.refresh()}
-        onFinishReview={() => setReviewOpen(true)}
+        onFinishReview={() => { if (page.drafts) refetchDrafts(); setReviewOpen(true); }}
+        draftCount={draftList.length}
         tabs={logicAvailable && (
           <PageTabs tabs={[{ id: "review", label: "Code view" }, { id: "logic", label: "Visualize" }]} active={tab} onSelect={setTab} />
         )}
@@ -513,9 +622,14 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
               onEdit={(c, body) => editComment(`comments/${c.id}`, body)}
               renderReply={(t) => (
                 <ReplyBox pr={pr} threadId={t.id} mentions onSubmit={(body) => postReply(t, body)}
+                  onDraft={page.drafts ? (body) => draftReply(t, body) : undefined}
                   onFocus={() => { if (store.getState().active !== t.id) activate(t.id); }} />
               )}
               claude={{ threads: claudeList, lives, onFollowUp: followUp, onDelete: deleteClaude }}
+              drafts={{
+                list: draftList, onSave: saveDraft, onDelete: deleteDraft,
+                onReattach: (d, on) => { activate(d.id); store.getState().setReattaching(on ? d.id : null); },
+              }}
               composer={composer && (
                 <Composer
                   key={`${composer.path}:${composer.start}:${composer.end}`}
@@ -524,6 +638,7 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
                   onModeChange={(mode) => store.getState().setComposerMode(mode)}
                   onCancel={closeComposer}
                   onSubmit={(body, mode) => (mode === "claude" ? askClaude(body) : postComment(body))}
+                  onDraft={page.drafts ? draftComment : undefined}
                   onDirtyChange={onDirtyChange}
                 />
               )}
@@ -531,7 +646,8 @@ function Review({ page, pr }: { page: Page; pr: PRRef }) {
           </div>
         </div>
       </div>
-      <FinishReview open={reviewOpen} onClose={() => setReviewOpen(false)} onSubmit={submitReview} />
+      <FinishReview open={reviewOpen} onClose={() => setReviewOpen(false)} onSubmit={submitReview}
+        drafts={page.drafts ? reviewDrafts : undefined} />
       <SelectionButton selection={selection} claude={page.claude} onComment={() => commentOnSelection("comment")} />
     </MentionsCtx.Provider>
     </ReviewPageCtx.Provider>

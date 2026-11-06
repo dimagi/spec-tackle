@@ -1,4 +1,4 @@
-import type { Activity, Page, PageFile, Thread } from "../api/types";
+import type { Activity, Draft, Page, PageFile, Thread } from "../api/types";
 
 export const PR = { owner: "o", repo: "r", number: 7, url: "https://github.com/o/r/pull/7" };
 
@@ -42,6 +42,21 @@ export function makePage(over: Partial<Page> = {}): Page {
     activity: makeActivity(),
     viewer: { login: "me", name: null, avatarUrl: "" },
     claude: false,
+    drafts: false,
     ...over,
   };
 }
+
+export function makeDraft(over: Partial<Draft> = {}): Draft {
+  return {
+    id: "D1", kind: "comment", body: "Why three retries?", path: "docs/a.md", startLine: 2, endLine: 3,
+    anchorText: "two\nthree", commit: "abc1234", outdated: false, threadId: null, sent: false, error: null,
+    createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z",
+    ...over,
+  };
+}
+
+export const makeReplyDraft = (over: Partial<Draft> = {}): Draft => makeDraft({
+  id: "D2", kind: "reply", body: "Agreed", path: null, startLine: null, endLine: null, anchorText: null,
+  commit: null, threadId: "T1", ...over,
+});

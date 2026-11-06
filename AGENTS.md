@@ -13,6 +13,7 @@ spec-tackle is a local web app for reviewing GitHub pull requests, built for spe
   - `auth.py`: GitHub sign-in (`GITHUB_TOKEN`/`GH_TOKEN`, `gh auth token`, `gh auth login --web`, or a pasted token kept in memory only)
   - `claude.py`, `claude_api.py`, `turns.py`, `checkout.py`: Ask Claude (private threads, background turns, read-only repo worktrees)
   - `logic.py`, `logic_api.py`: the Visualize tab's Flow mode (a Claude-drawn flowchart of the PR)
+  - `drafts_api.py`: review drafts (comments and replies kept locally, then posted as one GitHub review)
   - `calls.py`, `calls_api.py`: the Visualize tab's Calls mode (a static call tree of the changed Python code, via `ast`; no Claude)
   - `store.py`: local SQLite state under `~/.local/share/spec-tackle/`
   - `static/dist/`: the **committed** frontend build

@@ -36,3 +36,34 @@ test("a failed send keeps the text", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Reply" }));
   expect(screen.getByRole("textbox")).toHaveValue("Agreed");
 });
+
+test("Add to review keeps the reply as a draft and clears the box", async () => {
+  const onSubmit = vi.fn();
+  const onDraft = vi.fn().mockResolvedValue(undefined);
+  render(<ReplyBox pr={pr} threadId="T1" onSubmit={onSubmit} onDraft={onDraft} onFocus={vi.fn()} />);
+  await userEvent.type(screen.getByRole("textbox"), "Agreed");
+
+  await userEvent.click(screen.getByRole("button", { name: "Add to review" }));
+
+  expect(onDraft).toHaveBeenCalledWith("Agreed");
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.getByRole("textbox")).toHaveValue("");
+  expect(localStorage.getItem("spec-tackle:o/r#7:draft:T1")).toBeNull();
+});
+
+test("⌘⇧↵ adds a reply to the review", async () => {
+  const onSubmit = vi.fn();
+  const onDraft = vi.fn().mockResolvedValue(undefined);
+  render(<ReplyBox pr={pr} threadId="T1" onSubmit={onSubmit} onDraft={onDraft} onFocus={vi.fn()} />);
+
+  await userEvent.type(screen.getByRole("textbox"), "Later{Meta>}{Shift>}{Enter}{/Shift}{/Meta}");
+
+  expect(onDraft).toHaveBeenCalledWith("Later");
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
+test("a reply box that can't draft has only Reply", async () => {
+  render(<ReplyBox pr={pr} threadId="T1" onSubmit={vi.fn()} onFocus={vi.fn()} />);
+  await userEvent.click(screen.getByRole("textbox"));
+  expect(screen.queryByRole("button", { name: "Add to review" })).toBeNull();
+});

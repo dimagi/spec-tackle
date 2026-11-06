@@ -1,9 +1,10 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
-import type { ClaudeThread, Comment, Thread } from "../../api/types";
+import type { ClaudeThread, Comment, Draft, Thread } from "../../api/types";
 import { isCollapsible, isShown, threadRange } from "../../lib/threads";
 import { useReview } from "../../state/review";
 import { useReviewPage } from "./context";
 import { ClaudeCard } from "./ClaudeCard";
+import { DraftCard, DraftReply } from "./DraftCard";
 import type { Live } from "./hooks/claudeStream";
 import { ThreadCard } from "./ThreadCard";
 import { useMarginEngine, type MarginEngine, type MarginItem } from "./hooks/useMarginEngine";
@@ -22,19 +23,34 @@ type Props = {
     onFollowUp: (thread: ClaudeThread, question: string) => Promise<unknown>;
     onDelete: (thread: ClaudeThread) => void;
   };
+  /** Comments and replies kept for the review. */
+  drafts: {
+    list: Draft[];
+    onSave: (draft: Draft, body: string) => Promise<unknown>;
+    onDelete: (draft: Draft) => void;
+    onReattach: (draft: Draft, on: boolean) => void;
+  };
 };
 
 const isInteractive = (target: EventTarget) => !!(target as Element).closest("a, textarea, button");
 
-export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, composer, claude }: Props) {
+export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, composer, claude, drafts }: Props) {
   const { activity, fresh } = useReviewPage();
   const s = useReview((st) => st);
   const marginRef = useRef<HTMLDivElement>(null);
   const filters = { filter: s.filter, hideBots: s.hideBots };
 
+  const commentDrafts = drafts.list.filter((d) => d.kind === "comment");
+  const replyDrafts = (t: Thread) => drafts.list.filter((d) => d.kind === "reply" && d.threadId === t.id);
+  // A thread holding a drafted reply is always shown in full, so the draft can't go out unseen.
+  const shown = (t: Thread) => isShown(t, filters) || replyDrafts(t).length > 0;
+
   const items: MarginItem[] = activity.threads.map((t) => ({
-    id: t.id, kind: "thread", path: t.path, range: threadRange(t), resolved: t.isResolved, hidden: !isShown(t, filters),
+    id: t.id, kind: "thread", path: t.path, range: threadRange(t), resolved: t.isResolved, hidden: !shown(t),
   }));
+  for (const d of commentDrafts) {
+    items.push({ id: d.id, kind: "draft", path: d.path!, range: [d.startLine!, d.endLine!], hidden: false });
+  }
   for (const t of claude.threads) {
     items.push({ id: t.id, kind: "claude", path: t.path, range: [t.startLine, t.endLine], hidden: !s.showClaude });
   }
@@ -63,7 +79,8 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
     <div id="margin" ref={marginRef} className="relative hidden w-[340px] shrink-0 md:block xl:w-[380px]">
       {enlargedShown && <div className="enlarge-backdrop" data-testid="enlarge-backdrop" onClick={() => s.enlarge(null)} />}
       {activity.threads.map((t) => {
-        const collapsible = isCollapsible(t);
+        const replies = replyDrafts(t);
+        const collapsible = isCollapsible(t) && !replies.length;
         const collapsed = collapsible && !s.expanded.has(t.id) && s.active !== t.id;
         return (
           <div
@@ -72,7 +89,7 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
             data-thread={t.id}
             className={`thread-card ${collapsed ? "is-collapsed" : ""} ${s.enlarged === t.id ? "is-enlarged" : ""}`}
             {...enlargedProps(t.id, "Comment thread")}
-            hidden={!isShown(t, filters)}
+            hidden={!shown(t)}
             onClick={(e) => { if (!isInteractive(e.target) && s.active !== t.id) s.activate(t.id); }}
           >
             <ThreadCard
@@ -84,6 +101,9 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
               onEdit={onEdit}
               enlarged={s.enlarged === t.id} onEnlarge={(on) => s.enlarge(on ? t.id : null)}
             >
+              {replies.map((d) => (
+                <DraftReply key={d.id} draft={d} onSave={(body) => drafts.onSave(d, body)} onDelete={() => drafts.onDelete(d)} />
+              ))}
               {renderReply(t)}
             </ThreadCard>
           </div>
@@ -104,6 +124,21 @@ export function Margin({ docRef, engineRef, onResolve, onEdit, renderReply, comp
             onFollowUp={(q) => claude.onFollowUp(t, q)} onDelete={() => claude.onDelete(t)}
             onFocus={() => { if (s.active !== t.id) s.activate(t.id); }}
             enlarged={s.enlarged === t.id} onEnlarge={(on) => s.enlarge(on ? t.id : null)}
+          />
+        </div>
+      ))}
+      {commentDrafts.map((d) => (
+        <div
+          key={d.id}
+          data-card={d.id}
+          data-draft={d.id}
+          className="thread-card draft"
+          onClick={(e) => { if (!isInteractive(e.target) && s.active !== d.id) s.activate(d.id); }}
+        >
+          <DraftCard
+            draft={d} reattaching={s.reattaching === d.id}
+            onSave={(body) => drafts.onSave(d, body)} onDelete={() => drafts.onDelete(d)}
+            onReattach={(on) => drafts.onReattach(d, on)}
           />
         </div>
       ))}

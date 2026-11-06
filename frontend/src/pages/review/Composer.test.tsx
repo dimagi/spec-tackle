@@ -89,3 +89,39 @@ test("a preview error is shown as text, never as HTML", async () => {
   expect(container.querySelector(".preview img")).toBeNull();
   vi.unstubAllGlobals();
 });
+
+const plain = { path: "docs/a.md", start: 2, end: 3, quote: null, mode: "comment" as const };
+
+test("Add to review keeps the comment as a draft instead of posting it", async () => {
+  const onDraft = vi.fn().mockResolvedValue(undefined);
+  const { props } = renderComposer({ target: plain, onDraft });
+  await userEvent.type(screen.getByRole("textbox"), "  Why three?  ");
+
+  await userEvent.click(screen.getByRole("button", { name: "Add to review" }));
+
+  expect(onDraft).toHaveBeenCalledWith("Why three?");
+  expect(props.onSubmit).not.toHaveBeenCalled();
+});
+
+test("⌘⇧↵ adds to the review and ⌘↵ still posts", async () => {
+  const onDraft = vi.fn().mockResolvedValue(undefined);
+  const { props } = renderComposer({ target: plain, onDraft });
+  const box = screen.getByRole("textbox");
+  expect(screen.getByText("Markdown · ⌘↵ to post · ⌘⇧↵ to add to review")).toBeInTheDocument();
+
+  await userEvent.type(box, "Later{Meta>}{Shift>}{Enter}{/Shift}{/Meta}");
+  expect(onDraft).toHaveBeenCalledWith("Later");
+  expect(props.onSubmit).not.toHaveBeenCalled();
+
+  await userEvent.type(box, "{Meta>}{Enter}{/Meta}");
+  expect(props.onSubmit).toHaveBeenCalledWith("Later", "comment");
+});
+
+test("there is no Add to review when drafts are off, or when asking Claude", () => {
+  const { props, rerender } = renderComposer({ target: plain });
+  expect(screen.queryByRole("button", { name: "Add to review" })).toBeNull();
+  expect(screen.getByText("Markdown · ⌘↵ to post")).toBeInTheDocument();
+
+  rerender(<Composer {...props} onDraft={vi.fn()} target={{ ...plain, mode: "claude" }} />);
+  expect(screen.queryByRole("button", { name: "Add to review" })).toBeNull();
+});

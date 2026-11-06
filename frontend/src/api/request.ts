@@ -3,11 +3,14 @@
 export class ApiError extends Error {
   status: number;
   signedOut: boolean;
+  /** The rest of the error response, e.g. `draftId` when a draft couldn't be sent. */
+  data: Record<string, unknown>;
 
-  constructor(message: string, status: number, signedOut: boolean) {
+  constructor(message: string, status: number, signedOut: boolean, data: Record<string, unknown> = {}) {
     super(message);
     this.status = status;
     this.signedOut = signedOut;
+    this.data = data;
   }
 }
 
@@ -33,7 +36,7 @@ export async function request<T = unknown>(method: string, url: string, body?: u
       signedOutAnnounced = true;
       signedOutListener?.();
     }
-    throw new ApiError(data.error || detail || `Request failed (${res.status})`, res.status, !!data.signedOut);
+    throw new ApiError(data.error || detail || `Request failed (${res.status})`, res.status, !!data.signedOut, data);
   }
   return data as T;
 }

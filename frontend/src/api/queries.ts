@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 import type { PRRef } from "../state/storage";
 import { request } from "./request";
-import type { Activity, CallSource, CallTree, ClaudeThread, DocRefsState, RefTarget, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
+import type { Activity, CallSource, CallTree, ClaudeThread, DocRefsState, Drafts, RefTarget, LogicFunctions, LogicState, Page, PrSummary, Repo, Session } from "./types";
 
 export const POLL_MS = 30_000;
 
@@ -76,6 +76,18 @@ export function useClaudeThreads(pr: PRRef, enabled: boolean) {
     queryKey: claudeKey(pr),
     queryFn: () => request<ClaudeThread[]>("GET", `${apiBase(pr)}/claude/threads`),
     enabled,
+  });
+}
+
+export const draftsKey = (pr: PRRef) => ["drafts", pr.owner, pr.repo, pr.number];
+
+/** The reviewer's unsent drafts on this PR; re-read on focus, since another tab may have changed them. */
+export function useDrafts(pr: PRRef, enabled: boolean) {
+  return useQuery({
+    queryKey: draftsKey(pr),
+    queryFn: () => request<Drafts>("GET", `${apiBase(pr)}/drafts`),
+    enabled,
+    refetchOnWindowFocus: true,
   });
 }
 

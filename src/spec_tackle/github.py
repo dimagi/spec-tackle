@@ -223,6 +223,47 @@ def _repo(node: dict) -> dict:
     }
 
 
+# The viewer's pending review, if any: GitHub allows one per person per PR.
+_REVIEW_STATE_QUERY = """
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      id headRefOid
+      reviews(states: PENDING, first: 20) { nodes { id viewerDidAuthor comments { totalCount } } }
+    }
+  }
+}
+"""
+
+_START_REVIEW = """
+mutation($pull: ID!, $commit: GitObjectID!) {
+  addPullRequestReview(input: {pullRequestId: $pull, commitOID: $commit}) { pullRequestReview { id } }
+}
+"""
+
+_ADD_REVIEW_THREAD = """
+mutation($input: AddPullRequestReviewThreadInput!) {
+  addPullRequestReviewThread(input: $input) { thread { id } }
+}
+"""
+
+_ADD_REVIEW_REPLY = """
+mutation($review: ID!, $thread: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(
+    input: {pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body}
+  ) { comment { id } }
+}
+"""
+
+_SUBMIT_PENDING_REVIEW = """
+mutation($review: ID!, $event: PullRequestReviewEvent!, $body: String) {
+  submitPullRequestReview(input: {pullRequestReviewId: $review, event: $event, body: $body}) {
+    pullRequestReview { databaseId url }
+  }
+}
+"""
+
+
 class GitHub:
     def __init__(self, token: str):
         self.token = token
@@ -406,6 +447,51 @@ class GitHub:
             json=payload,
         )
         return response.json()
+
+    # A review built up from local drafts (see docs/specs/2026-10-13-draft-comments-design.md).
+
+    async def review_state(self, pr: PRRef) -> dict:
+        """The PR's head commit and node id, and the viewer's pending review if there is one."""
+        data = await self._graphql(
+            _REVIEW_STATE_QUERY, owner=pr.owner, repo=pr.repo, number=pr.number
+        )
+        pull = (data.get("repository") or {}).get("pullRequest")
+        if pull is None:
+            raise GitHubError("Pull request not found", 404)
+        mine = [r for r in pull["reviews"]["nodes"] if r and r["viewerDidAuthor"]]
+        pending = {"id": mine[0]["id"], "comments": mine[0]["comments"]["totalCount"]} if mine else None
+        return {"head": pull["headRefOid"], "pullRequestId": pull["id"], "pending": pending}
+
+    async def start_review(self, pull_request_id: str, commit: str) -> str:
+        """Open a pending review, visible only to the viewer; returns its id."""
+        data = await self._graphql(_START_REVIEW, pull=pull_request_id, commit=commit)
+        return data["addPullRequestReview"]["pullRequestReview"]["id"]
+
+    async def add_review_thread(
+        self, review_id: str, *, path: str, body: str, line: int | None = None,
+        start_line: int | None = None,
+    ) -> None:
+        """Add a comment to a pending review: on new-side lines, or on the file when `line` is None."""
+        thread = {"pullRequestReviewId": review_id, "path": path, "body": body}
+        if line is None:
+            thread["subjectType"] = "FILE"
+        else:
+            thread.update(line=line, side="RIGHT")
+            if start_line:
+                thread.update(startLine=start_line, startSide="RIGHT")
+        data = await self._graphql(_ADD_REVIEW_THREAD, input=thread)
+        # GitHub answers with no thread and no error when it can't place the comment.
+        if not (data.get("addPullRequestReviewThread") or {}).get("thread"):
+            raise GitHubError("GitHub couldn't attach a comment to those lines", 502)
+
+    async def add_review_reply(self, review_id: str, thread_id: str, body: str) -> None:
+        await self._graphql(_ADD_REVIEW_REPLY, review=review_id, thread=thread_id, body=body)
+
+    async def submit_pending_review(self, review_id: str, event: str, body: str) -> dict:
+        data = await self._graphql(
+            _SUBMIT_PENDING_REVIEW, review=review_id, event=event, body=body or None
+        )
+        return data["submitPullRequestReview"]["pullRequestReview"]
 
     async def edit_review_comment(self, pr: PRRef, comment_id: int, body: str) -> dict:
         response = await self._request(
