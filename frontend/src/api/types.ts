@@ -97,7 +97,35 @@ export type Page = {
   activity: Activity;
   viewer: Viewer | null;
   claude: boolean;
+  /** Whether comments can be kept as drafts (the server has its local store). */
+  drafts: boolean;
 };
+
+/** A comment or reply kept locally until the review is submitted. */
+export type Draft = {
+  id: string;
+  kind: "comment" | "reply";
+  body: string;
+  /** Comment drafts: the lines, the text they held when the draft was written, and that commit. */
+  path: string | null;
+  startLine: number | null;
+  endLine: number | null;
+  anchorText: string | null;
+  commit: string | null;
+  /** The lines no longer hold `anchorText`; never true for a reply. */
+  outdated: boolean;
+  /** Reply drafts: the review thread replied to. */
+  threadId: string | null;
+  /** Already in the pending review on GitHub, so it can't be changed here. */
+  sent: boolean;
+  /** Why the last attempt to send it failed. */
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** GET …/drafts. `githubPending`: comments waiting in a review started on github.com. */
+export type Drafts = { drafts: Draft[]; githubPending: number };
 
 export type ClaudeMessage = {
   role: "user" | "assistant" | "error";

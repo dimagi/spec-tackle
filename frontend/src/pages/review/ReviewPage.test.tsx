@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Page } from "../../api/types";
-import { makeActivity, makeFile, makePage, makeThread } from "../../test/fixtures";
+import type { Draft, Page } from "../../api/types";
+import { makeActivity, makeDraft, makeFile, makePage, makeReplyDraft, makeThread } from "../../test/fixtures";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { ReviewPage } from "./ReviewPage";
 
@@ -119,4 +119,150 @@ test("a thread enlarges over the page; Escape or the backdrop puts it back, and 
   await userEvent.click(within(card("T2") as HTMLElement).getByRole("button", { name: "Enlarge thread" }));
   await userEvent.click(within(card("T2") as HTMLElement).getByRole("button", { name: "Shrink thread" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+type Call = { method: string; url: string; body: unknown };
+
+/** The review page over a fake API that keeps drafts; returns the requests it made. */
+function renderWithDrafts(page: Page, drafts: Draft[], answer: (call: Call) => unknown = () => ({})) {
+  class Observer { observe() {} unobserve() {} disconnect() {} }
+  vi.stubGlobal("ResizeObserver", Observer);
+  vi.stubGlobal("IntersectionObserver", Observer);
+  Element.prototype.scrollIntoView ??= () => {};
+  const calls: Call[] = [];
+  let list = drafts;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    const call = { method, url, body: init?.body ? JSON.parse(init.body as string) : undefined };
+    if (method !== "GET") calls.push(call);
+    const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+    if (url.endsWith("/page")) return reply(page);
+    if (url.endsWith("/activity")) return reply(page.activity);
+    if (url.endsWith("/drafts") && method === "GET") return reply({ drafts: list, githubPending: 0 });
+    if (url.endsWith("/drafts") && method === "POST") {
+      const created = makeDraft({ id: "D-new", body: call.body.body, startLine: call.body.start, endLine: call.body.end });
+      list = [...list, created];
+      return reply(created);
+    }
+    if (url.endsWith("/review")) {
+      const result = answer(call) as { status?: number };
+      if (result.status) return reply(result, result.status);
+      list = [];
+      return reply(result);
+    }
+    return reply(answer(call));
+  }));
+  const router = createMemoryRouter([{ path: "/pr/:owner/:repo/:number", element: <ReviewPage /> }], { initialEntries: ["/pr/o/r/7"] });
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><RouterProvider router={router} /></QueryClientProvider>);
+  return calls;
+}
+
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
+});
+
+test("Add to review keeps a comment as a draft in the margin and counts it", async () => {
+  const calls = renderWithDrafts(makePage({ drafts: true }), []);
+  await userEvent.click(await screen.findByText("two three"));
+  await userEvent.type(screen.getByPlaceholderText(/What should change/), "Why three?");
+
+  await userEvent.click(screen.getByRole("button", { name: "Add to review" }));
+
+  expect(await screen.findByText("Draft · only you")).toBeInTheDocument();
+  expect(calls).toEqual([{ method: "POST", url: "/api/pr/o/r/7/drafts",
+    body: { path: "docs/a.md", start: 2, end: 3, commit: "abc1234", body: "Why three?" } }]);
+  expect(document.querySelector('[data-card="D-new"]')).toHaveTextContent("Why three?");
+  expect(screen.queryByPlaceholderText(/What should change/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Finish review · 1" })).toBeInTheDocument();
+});
+
+test("without the local store there is nothing to draft with", async () => {
+  renderWithDrafts(makePage({ drafts: false }), []);
+  await userEvent.click(await screen.findByText("two three"));
+  expect(screen.getByPlaceholderText(/What should change/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Add to review" })).toBeNull();
+});
+
+test("a resolved thread with a drafted reply stays open, showing the draft", async () => {
+  localStorage.clear(); // the Open filter, which hides resolved threads
+  const bare = makeThread({ id: "T2", line: 1, isResolved: true });
+  bare.comments = [{ ...bare.comments[0], id: 102 }];
+  const page = makePage({ drafts: true, activity: makeActivity({ threads: [makeThread({ isResolved: true }), bare] }) });
+  renderWithDrafts(page, [makeReplyDraft({ threadId: "T1" })]);
+
+  const card = await screen.findByText("Agreed");
+
+  expect(card.closest("[data-card]")).toHaveAttribute("data-card", "T1");
+  expect(card.closest("[data-card]")).toBeVisible();
+  expect(document.querySelector('[data-card="T1"]')).not.toHaveClass("is-collapsed");
+  expect(document.querySelector('[data-card="T2"]')).not.toBeVisible();
+});
+
+test("submitting the review sends the drafts and says how many", async () => {
+  const calls = renderWithDrafts(makePage({ drafts: true }), [makeDraft()], () => ({ sent: 1, held: 0 }));
+  await userEvent.click(await screen.findByRole("button", { name: "Finish review · 1" }));
+  expect(await screen.findByText("1 draft will be posted with this review.")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Submit review" }));
+
+  expect(await screen.findByText("Review submitted with 1 draft")).toBeInTheDocument();
+  expect(calls).toEqual([{ method: "POST", url: "/api/pr/o/r/7/review", body: { event: "COMMENT", body: "" } }]);
+  expect(await screen.findByRole("button", { name: "Finish review" })).toBeInTheDocument();
+  expect(screen.queryByText("Draft · only you")).toBeNull();
+});
+
+test("a draft that can't be sent closes the dialog and becomes the active card", async () => {
+  renderWithDrafts(makePage({ drafts: true }), [makeDraft()],
+    () => ({ status: 502, error: "A draft couldn't be added to the review: nope", draftId: "D1" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Finish review · 1" }));
+  await userEvent.click(screen.getByRole("button", { name: "Submit review" }));
+
+  expect(await screen.findByText("A draft couldn't be added to the review: nope")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // The draft is the active card: its passage is marked as such.
+  await waitFor(() => expect(document.querySelector(".has-draft.is-active-anchor")).not.toBeNull());
+});
+
+test("re-attaching an outdated draft moves it to the passage clicked next", async () => {
+  const moved = makeDraft({ outdated: false, startLine: 1, endLine: 1, anchorText: "Title" });
+  const calls = renderWithDrafts(makePage({ drafts: true }), [makeDraft({ outdated: true })], () => moved);
+  await userEvent.click(await screen.findByRole("button", { name: "Re-attach" }));
+  expect(screen.getByText(/Click a passage or select text/)).toBeInTheDocument();
+
+  await userEvent.click(screen.getByText("Title", { selector: "h1[data-ls]" }));
+
+  expect(calls).toEqual([{ method: "PATCH", url: "/api/drafts/D1",
+    body: { path: "docs/a.md", start: 1, end: 1, commit: "abc1234" } }]);
+  await waitFor(() => expect(screen.queryByText("Outdated")).toBeNull());
+  expect(screen.queryByPlaceholderText(/What should change/)).toBeNull(); // no composer opened
+  expect(document.querySelector('[data-card="D1"]')).toHaveTextContent("L1");
+});
+
+test("Escape cancels re-attaching", async () => {
+  renderWithDrafts(makePage({ drafts: true }), [makeDraft({ outdated: true })]);
+  await userEvent.click(await screen.findByRole("button", { name: "Re-attach" }));
+
+  await userEvent.keyboard("{Escape}");
+
+  expect(screen.queryByText(/Click a passage or select text/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Re-attach" })).toBeInTheDocument();
+});
+
+test("asking Claude while Claude threads are hidden shows them again, so the answer isn't lost", async () => {
+  localStorage.setItem("spec-tackle:o/r#7:showClaude", "false");
+  const thread = {
+    id: "C1", path: "docs/a.md", startLine: 2, endLine: 3, anchorText: "two three", commit: "abc1234",
+    createdAt: "2026-10-15T00:00:00Z", running: false,
+    messages: [{ role: "user", body: "Why three?", createdAt: "2026-10-15T00:00:00Z" }],
+  };
+  renderWithDrafts(makePage({ claude: true }), [], (call) =>
+    call.url.endsWith("/claude/threads") ? (call.method === "POST" ? thread : []) : {});
+  await userEvent.click(await screen.findByText("two three"));
+  await userEvent.click(screen.getByRole("button", { name: "Ask Claude" }));
+  await userEvent.type(screen.getByPlaceholderText(/Ask Claude about this passage/), "Why three?{Control>}{Enter}{/Control}");
+
+  await waitFor(() => expect(document.querySelector('[data-card="C1"]')).toBeVisible());
+  expect(screen.getByRole("checkbox", { name: /Show Claude threads/ })).toBeChecked();
+  localStorage.clear();
 });

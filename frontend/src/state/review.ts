@@ -18,6 +18,8 @@ export type ReviewState = {
   expandedBodies: Set<number>;
   /** The thread shown large in the middle of the page, if any. */
   enlarged: string | null;
+  /** The draft being moved: the next lines the reviewer picks become its lines. */
+  reattaching: string | null;
   setFilter: (f: "open" | "all") => void;
   setHideBots: (v: boolean) => void;
   setShowClaude: (v: boolean) => void;
@@ -26,6 +28,7 @@ export type ReviewState = {
   collapse: (id: string) => void;
   expandBody: (commentId: number) => void;
   enlarge: (id: string | null) => void;
+  setReattaching: (draftId: string | null) => void;
   openComposer: (target: ComposerTarget) => void;
   setComposerMode: (mode: ComposerMode) => void;
   closeComposer: () => void;
@@ -42,6 +45,7 @@ export function createReviewStore(pr: PRRef): StoreApi<ReviewState> {
     expanded: new Set(),
     expandedBodies: new Set(),
     enlarged: null,
+    reattaching: null,
     setFilter: (filter) => { savePref(pr, "filter", filter); set({ filter }); },
     setHideBots: (hideBots) => { savePref(pr, "hideBots", hideBots); set({ hideBots }); },
     setShowClaude: (showClaude) => { savePref(pr, "showClaude", showClaude); set({ showClaude }); },
@@ -61,6 +65,7 @@ export function createReviewStore(pr: PRRef): StoreApi<ReviewState> {
     enlarge: (enlarged) => set(enlarged
       ? { enlarged, active: enlarged, expanded: new Set(get().expanded).add(enlarged) }
       : { enlarged: null }),
+    setReattaching: (reattaching) => set({ reattaching }),
     openComposer: (composer) => set({ composer, active: "composer" }),
     setComposerMode: (mode) => {
       const c = get().composer;

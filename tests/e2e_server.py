@@ -71,6 +71,9 @@ class FakeGitHub:
         self.reviews: list[dict] = []
         self.posted: list[dict] = []
         self.python = False  # POST /e2e/python adds a Python change to the PR
+        self.docs: dict[str, str] = {}  # docs/retry.md at commits where it differs from DOC
+        self.pending: dict | None = None  # the viewer's pending review: threads and replies not yet public
+        self.submitted: list[dict] = []
 
     def _activity(self, pr) -> dict:
         # Only PR 7 has comments, so a second PR shows whether state leaks between them.
@@ -95,7 +98,7 @@ class FakeGitHub:
                 *([BACKOFF_FILE] if self.python else [])]
 
     async def raw_file(self, owner, repo, path, ref):
-        return {"app/backoff.py": BACKOFF, "app/forms.py": FORMS}.get(path, DOC).encode()
+        return {"app/backoff.py": BACKOFF, "app/forms.py": FORMS}.get(path, self.docs.get(ref, DOC)).encode()
 
     async def render_markdown(self, pr, text):
         return f"<p>{text}</p>"
@@ -123,6 +126,36 @@ class FakeGitHub:
         state = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(event, "COMMENTED")
         self.reviews.append({**r, "state": state, "submittedAt": r["createdAt"]})
         return {"id": r["databaseId"]}
+
+    # A review built from drafts: nothing in it shows on the PR until it is submitted.
+
+    async def review_state(self, pr):
+        pending = self.pending and {"id": self.pending["id"],
+                                    "comments": len(self.pending["threads"]) + len(self.pending["replies"])}
+        return {"head": self.head, "pullRequestId": "PR7", "pending": pending}
+
+    async def start_review(self, pull_request_id, commit):
+        self.pending = {"id": f"R{next(ids)}", "commit": commit, "threads": [], "replies": []}
+        return self.pending["id"]
+
+    async def add_review_thread(self, review_id, *, path, body, line=None, start_line=None):
+        self.pending["threads"].append({"path": path, "body": body, "line": line, "start_line": start_line})
+
+    async def add_review_reply(self, review_id, thread_id, body):
+        self.pending["replies"].append({"thread": thread_id, "body": body})
+
+    async def submit_pending_review(self, review_id, event, body):
+        review, self.pending = self.pending, None
+        for t in review["threads"]:
+            self.threads.append(thread(t["line"] or 1, comment(ME, t["body"])))
+        for r in review["replies"]:
+            for t in self.threads:
+                if t["id"] == r["thread"]:
+                    t["comments"]["nodes"].append(comment(ME, r["body"]))
+        self.submitted.append({**review, "event": event, "body": body})
+        if body or event != "COMMENT":
+            await self.submit_review(pr=None, event=event, body=body)
+        return {"databaseId": next(ids)}
 
     async def repos(self, query=""):
         return [{"owner": "o", "repo": "r", "description": "Form submission specs", "isPrivate": False,
@@ -187,13 +220,22 @@ class FakeSession:
 async def posted():
     """What the UI sent to the fake GitHub, for assertions."""
     gh = app.state.session.gh
-    return {"comments": gh.posted, "threads": gh.threads}
+    return {"comments": gh.posted, "threads": gh.threads, "reviews": gh.submitted, "pending": gh.pending}
 
 
 @app.post("/e2e/push")
 async def push():
     """Someone force-pushes: the PR's head moves on."""
     app.state.session.gh.head = "e2e1111newhead"
+    return {"ok": True}
+
+
+@app.post("/e2e/reword")
+async def reword():
+    """A new commit rewrites the Limits paragraph."""
+    gh = app.state.session.gh
+    gh.head = "e2e2222reworded"
+    gh.docs[gh.head] = DOC.replace("At most five tries.", "At most three tries, then give up.")
     return {"ok": True}
 
 

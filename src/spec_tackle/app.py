@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import calls_api, claude, claude_api, logic_api, pages, refs_api, render
+from . import calls_api, claude, claude_api, drafts_api, logic_api, pages, refs_api, render
 from .access import Access, Gate
 from .auth import LoginFlow, NotSignedIn, Session
 from .checkout import Checkouts
@@ -103,6 +103,7 @@ app.include_router(claude_api.router)
 app.include_router(logic_api.router)
 app.include_router(calls_api.router)
 app.include_router(refs_api.router)
+app.include_router(drafts_api.router)
 
 
 @app.exception_handler(GitHubError)
@@ -238,6 +239,7 @@ async def page_data(request: Request, owner: str, repo: str, number: int):
         "overview": pages.public_overview(page["overview"]),
         "viewer": await session(request).viewer(),
         "claude": bool(request.app.state.claude_cli),
+        "drafts": request.app.state.store is not None,
     }
 
 
@@ -280,10 +282,12 @@ async def conversation(request: Request, owner: str, repo: str, number: int, b: 
 async def review(request: Request, owner: str, repo: str, number: int, r: Review):
     if r.event not in ("APPROVE", "REQUEST_CHANGES", "COMMENT"):
         raise HTTPException(400, "Unknown review type")
-    if r.event != "APPROVE":
-        _require_body(r.body)
     client = await gh(request)
-    return await client.submit_review(PRRef(owner, repo, number), r.event, r.body)
+    login = (await session(request).viewer())["login"]
+    return await drafts_api.submit_review(
+        store=request.app.state.store, client=client, login=login, pr=PRRef(owner, repo, number),
+        event=r.event, body=r.body,
+    )
 
 
 @app.post("/api/pr/{owner}/{repo}/{number}/preview")

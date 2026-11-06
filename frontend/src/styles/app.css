@@ -335,6 +335,12 @@ body.has-enlarged { overflow: hidden; }
 html.dark .btn-primary { background: #fbbf24; color: #1c1917; }
 html.dark .btn-primary:hover { background: #fcd34d; }
 html.dark .gutter-add { background: #fbbf24; color: #1c1917; }
+.btn-secondary {
+  border-radius: 8px; padding: 4px 11px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--card-border); color: var(--ink);
+}
+.btn-secondary:hover { background: rgba(120,113,108,.12); }
+.btn-secondary:disabled { opacity: .5; cursor: progress; }
 .btn-ghost { border-radius: 8px; padding: 5px 10px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .btn-ghost:hover { background: rgba(120,113,108,.12); color: var(--ink); }
 kbd { font: 500 10px "JetBrains Mono", monospace; padding: 0 4px; border-radius: 4px; border: 1px solid rgba(120,113,108,.35); }
@@ -496,3 +502,20 @@ html.dark .claude-error { color: #fca5a5; }
   padding: 2px 6px; font-size: 12px; font-family: "JetBrains Mono", monospace;
 }
 .repo-select:focus { outline: none; border-color: #f59e0b; }
+
+/* ── Review drafts: kept locally until the review is submitted ── */
+.thread-card.draft { border-left: 3px dashed var(--draft-edge); }
+.thread-card.draft.is-active { box-shadow: 0 0 0 2px var(--draft-edge), 0 10px 30px rgba(28,25,23,.12); }
+.chip-draft { background: var(--draft); color: var(--draft-edge); font-family: Inter, sans-serif; }
+.view .has-draft:not(.has-thread) { background: var(--draft); box-shadow: -3px 0 0 var(--draft-edge); }
+.view table .has-draft { box-shadow: none; }
+.view tr.has-draft:not(.has-thread) > :first-child { box-shadow: inset 3px 0 0 var(--draft-edge); }
+tr.has-draft > td { background: transparent; }
+.diff tr.has-draft:not(.has-thread) td { background: var(--draft) !important; }
+.draft-outdated blockquote {
+  margin: 6px 12px 0; padding: 4px 10px; border-left: 3px solid var(--card-border);
+  font-size: 12px; line-height: 1.45; color: var(--muted); white-space: pre-wrap; max-height: 7rem; overflow: auto;
+}
+.draft-reply { background: var(--draft); }
+.draft-reply .hint { padding: 4px 0 0; }
+.draft-reply .comment-meta .icon-btn { font-size: 11px; }

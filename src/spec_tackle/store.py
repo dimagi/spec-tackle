@@ -62,6 +62,20 @@ _MIGRATIONS = [
     ALTER TABLE doc_refs ADD COLUMN based_on TEXT;
     ALTER TABLE doc_refs ADD COLUMN outdated INTEGER NOT NULL DEFAULT 0;
     """,
+    # 6: comments and replies held back until the review is submitted
+    # (see docs/specs/2026-10-13-draft-comments-design.md)
+    """
+    CREATE TABLE review_drafts (
+        id TEXT PRIMARY KEY, login TEXT NOT NULL,
+        owner TEXT NOT NULL, repo TEXT NOT NULL, number INTEGER NOT NULL,
+        kind TEXT NOT NULL, body TEXT NOT NULL,
+        path TEXT, start_line INTEGER, end_line INTEGER, anchor_text TEXT, commit_sha TEXT,
+        checked_sha TEXT, outdated INTEGER NOT NULL DEFAULT 0,
+        thread_id TEXT, sent_review_id TEXT, error TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX review_drafts_by_pr ON review_drafts (login, owner, repo, number);
+    """,
 ]
 
 
@@ -286,4 +300,106 @@ class Store:
             "basedOn": row["based_on"],
             "outdated": row["outdated"],
             "createdAt": row["created_at"],
+        }
+
+    # -- Review drafts ---------------------------------------------------------
+
+    def create_comment_draft(
+        self, *, login: str, pr: PRRef, path: str, start: int, end: int, anchor_text: str,
+        commit: str, body: str,
+    ) -> str:
+        """A comment on lines of `path` as they are at `commit`, kept until the review is submitted."""
+        draft_id = str(uuid.uuid4())
+        now = _now()
+        self._db.execute(
+            "INSERT INTO review_drafts (id, login, owner, repo, number, kind, body, path, start_line,"
+            " end_line, anchor_text, commit_sha, checked_sha, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, 'comment', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (draft_id, login, pr.owner, pr.repo, pr.number, body, path, start, end, anchor_text,
+             commit, commit, now, now),
+        )
+        return draft_id
+
+    def create_reply_draft(self, *, login: str, pr: PRRef, thread_id: str, body: str) -> str:
+        draft_id = str(uuid.uuid4())
+        now = _now()
+        self._db.execute(
+            "INSERT INTO review_drafts (id, login, owner, repo, number, kind, body, thread_id,"
+            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'reply', ?, ?, ?, ?)",
+            (draft_id, login, pr.owner, pr.repo, pr.number, body, thread_id, now, now),
+        )
+        return draft_id
+
+    def draft(self, *, login: str, draft_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM review_drafts WHERE id = ? AND login = ?", (draft_id, login)
+        ).fetchone()
+        return self._draft(row) if row else None
+
+    def drafts_for_pr(self, *, login: str, pr: PRRef) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT * FROM review_drafts WHERE login = ? AND owner = ? AND repo = ? AND number = ?"
+            " ORDER BY created_at, rowid",
+            (login, pr.owner, pr.repo, pr.number),
+        ).fetchall()
+        return [self._draft(row) for row in rows]
+
+    def set_draft_body(self, *, draft_id: str, body: str) -> None:
+        self._db.execute(
+            "UPDATE review_drafts SET body = ?, error = NULL, updated_at = ? WHERE id = ?",
+            (body, _now(), draft_id),
+        )
+
+    def reattach_draft(
+        self, *, draft_id: str, path: str, start: int, end: int, anchor_text: str, commit: str
+    ) -> None:
+        """Move a comment draft to other lines; it is no longer outdated."""
+        self._db.execute(
+            "UPDATE review_drafts SET path = ?, start_line = ?, end_line = ?, anchor_text = ?,"
+            " commit_sha = ?, checked_sha = ?, outdated = 0, error = NULL, updated_at = ? WHERE id = ?",
+            (path, start, end, anchor_text, commit, commit, _now(), draft_id),
+        )
+
+    def set_draft_outdated(self, *, draft_id: str, checked_sha: str, outdated: bool) -> None:
+        self._db.execute(
+            "UPDATE review_drafts SET checked_sha = ?, outdated = ? WHERE id = ?",
+            (checked_sha, int(outdated), draft_id),
+        )
+
+    def mark_draft_sent(self, *, draft_id: str, review_id: str) -> None:
+        self._db.execute(
+            "UPDATE review_drafts SET sent_review_id = ?, error = NULL WHERE id = ?",
+            (review_id, draft_id),
+        )
+
+    def set_draft_error(self, *, draft_id: str, error: str) -> None:
+        self._db.execute("UPDATE review_drafts SET error = ? WHERE id = ?", (error, draft_id))
+
+    def delete_draft(self, *, login: str, draft_id: str) -> bool:
+        cursor = self._db.execute(
+            "DELETE FROM review_drafts WHERE id = ? AND login = ?", (draft_id, login)
+        )
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _draft(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "owner": row["owner"],
+            "repo": row["repo"],
+            "number": row["number"],
+            "kind": row["kind"],
+            "body": row["body"],
+            "path": row["path"],
+            "startLine": row["start_line"],
+            "endLine": row["end_line"],
+            "anchorText": row["anchor_text"],
+            "commit": row["commit_sha"],
+            "checkedSha": row["checked_sha"],
+            "outdated": bool(row["outdated"]),
+            "threadId": row["thread_id"],
+            "sentReviewId": row["sent_review_id"],
+            "error": row["error"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
         }

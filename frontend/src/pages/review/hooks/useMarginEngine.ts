@@ -5,7 +5,7 @@ import { layoutCards } from "../../../lib/layout";
 /** Something in the margin that sits beside lines of a file. */
 export type MarginItem = {
   id: string;
-  kind: "thread" | "claude" | "composer";
+  kind: "thread" | "claude" | "draft" | "composer";
   path: string;
   range: [number, number] | null;
   resolved?: boolean;
@@ -20,7 +20,7 @@ export type MarginEngine = {
   scheduleLayout: () => void;
 };
 
-const ANCHOR_CLASSES = ["has-thread", "has-claude", "is-active-anchor", "is-drafting"];
+const ANCHOR_CLASSES = ["has-thread", "has-claude", "has-draft", "is-active-anchor", "is-drafting"];
 
 const sectionFor = (doc: HTMLElement, path: string) =>
   doc.querySelector<HTMLElement>(`section.file[data-path="${CSS.escape(path)}"]`);
@@ -63,6 +63,7 @@ export function useMarginEngine(
       for (const el of found) {
         if (item.kind === "composer") el.classList.add("is-drafting");
         else if (item.kind === "claude") el.classList.add("has-claude");
+        else if (item.kind === "draft") el.classList.add("has-draft");
         else if (!item.resolved || isActive) el.classList.add("has-thread");
         if (isActive && item.kind !== "composer") el.classList.add("is-active-anchor");
         if (item.kind !== "composer") threadsByEl.current.set(el, [...(threadsByEl.current.get(el) ?? []), item.id]);

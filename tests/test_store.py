@@ -81,9 +81,10 @@ def test_migrates_an_old_database(tmp_path):
     s = Store.open(path)
     assert s.threads_for_pr(login="me", pr=PR) == []
     s.close()
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (5,)
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (6,)
     s = Store.open(path)
     assert s.latest_logic_map(login="me", pr=PR) is None
+    assert s.drafts_for_pr(login="me", pr=PR) == []
     s.close()
 
 
@@ -152,3 +153,76 @@ def test_regenerating_doc_refs_for_the_same_commit_replaces_them(store):
     store.save_doc_refs(login="me", pr=PR, path="docs/a.md", head_sha="abc", refs=[])
     assert store.latest_doc_refs(login="me", pr=PR, path="docs/a.md")["refs"] == []
     assert store._db.execute("SELECT COUNT(*) FROM doc_refs").fetchone()[0] == 1
+
+
+def _new_draft(store, login="me", body="Why 3 retries?"):
+    return store.create_comment_draft(
+        login=login, pr=PR, path="docs/a.md", start=3, end=4, anchor_text="three\nfour",
+        commit="abc123", body=body,
+    )
+
+
+def test_comment_draft_round_trip(store):
+    draft_id = _new_draft(store)
+
+    draft = store.draft(login="me", draft_id=draft_id)
+
+    assert draft["kind"] == "comment"
+    assert (draft["path"], draft["startLine"], draft["endLine"]) == ("docs/a.md", 3, 4)
+    assert draft["anchorText"] == "three\nfour"
+    assert draft["commit"] == draft["checkedSha"] == "abc123"
+    assert draft["outdated"] is False
+    assert draft["sentReviewId"] is None and draft["error"] is None
+    assert store.drafts_for_pr(login="me", pr=PR) == [draft]
+
+
+def test_reply_draft_has_a_thread_and_no_lines(store):
+    draft_id = store.create_reply_draft(login="me", pr=PR, thread_id="T1", body="Agreed")
+
+    draft = store.draft(login="me", draft_id=draft_id)
+
+    assert (draft["kind"], draft["threadId"], draft["path"]) == ("reply", "T1", None)
+
+
+def test_drafts_belong_to_one_login(store):
+    draft_id = _new_draft(store, login="me")
+
+    assert store.draft(login="other", draft_id=draft_id) is None
+    assert store.drafts_for_pr(login="other", pr=PR) == []
+    assert store.delete_draft(login="other", draft_id=draft_id) is False
+    assert store.draft(login="me", draft_id=draft_id) is not None
+
+
+def test_reattaching_a_draft_clears_its_outdated_flag(store):
+    draft_id = _new_draft(store)
+    store.set_draft_outdated(draft_id=draft_id, checked_sha="def456", outdated=True)
+    assert store.draft(login="me", draft_id=draft_id)["outdated"] is True
+
+    store.reattach_draft(
+        draft_id=draft_id, path="docs/a.md", start=7, end=7, anchor_text="seven", commit="def456"
+    )
+
+    draft = store.draft(login="me", draft_id=draft_id)
+    assert (draft["startLine"], draft["endLine"], draft["anchorText"]) == (7, 7, "seven")
+    assert draft["outdated"] is False and draft["commit"] == "def456"
+
+
+def test_sending_a_draft_clears_its_error(store):
+    draft_id = _new_draft(store)
+    store.set_draft_error(draft_id=draft_id, error="GitHub said no")
+    assert store.draft(login="me", draft_id=draft_id)["error"] == "GitHub said no"
+
+    store.mark_draft_sent(draft_id=draft_id, review_id="R1")
+
+    draft = store.draft(login="me", draft_id=draft_id)
+    assert draft["sentReviewId"] == "R1" and draft["error"] is None
+
+
+def test_editing_and_deleting_a_draft(store):
+    draft_id = _new_draft(store)
+
+    store.set_draft_body(draft_id=draft_id, body="Why 5 retries?")
+    assert store.draft(login="me", draft_id=draft_id)["body"] == "Why 5 retries?"
+
+    assert store.delete_draft(login="me", draft_id=draft_id) is True
+    assert store.drafts_for_pr(login="me", pr=PR) == []

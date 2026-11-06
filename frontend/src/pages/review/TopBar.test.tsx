@@ -51,3 +51,12 @@ test("new commits show a reload banner", () => {
   expect(screen.getByText("New commits pushed")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
 });
+
+test("the Finish review button counts the drafts", () => {
+  const { unmount } = renderBar();
+  expect(screen.getByRole("button", { name: "Finish review" })).toBeInTheDocument();
+  unmount();
+
+  renderBar({ draftCount: 3 });
+  expect(screen.getByRole("button", { name: "Finish review · 3" })).toBeInTheDocument();
+});

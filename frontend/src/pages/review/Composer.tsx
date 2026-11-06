@@ -18,18 +18,21 @@ export type ComposerProps = {
   onModeChange: (mode: ComposerMode) => void;
   onCancel: () => void;
   onSubmit: (body: string, mode: ComposerMode) => Promise<unknown>;
+  /** Keep a comment as a draft for the review; without it, comments can only be posted. */
+  onDraft?: (body: string) => Promise<unknown>;
   /** Whether there's unsent text worth confirming before discarding. */
   onDirtyChange: (dirty: boolean) => void;
 };
 
-export function Composer({ target, file, claude, api, onModeChange, onCancel, onSubmit, onDirtyChange }: ComposerProps) {
+export function Composer({ target, file, claude, api, onModeChange, onCancel, onSubmit, onDraft, onDirtyChange }: ComposerProps) {
   const quoteText = quoteFor(target.quote);
   const mode: ComposerMode = claude ? target.mode : "comment";
   const m = MODES[mode];
   const [text, setText] = useState(mode === "claude" ? "" : quoteText);
   const [preview, setPreview] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"post" | "draft" | null>(null);
+  const canDraft = mode === "comment" && !!onDraft;
   const textarea = useRef<HTMLTextAreaElement>(null);
 
   // Claude mode never quotes (the card shows the lines) and never previews (that calls GitHub).
@@ -76,15 +79,17 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
     hint = `Only ${rangeLabel(ok.start, ok.end)} of this passage changed in the PR, so the comment will be attached there.`;
   }
 
-  const submit = async () => {
+  const submit = async (how: "post" | "draft" = "post") => {
     if (busy) return; // ⌘↵ while a post is in flight
     const body = text.trim();
     if (!body) return textarea.current?.focus();
-    setBusy(true);
+    setBusy(how);
     try {
-      await onSubmit(body, mode);
+      await (how === "draft" && onDraft ? onDraft(body) : onSubmit(body, mode));
+    } catch {
+      /* the caller reports the error; keep the text */
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -128,7 +133,7 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              submit();
+              submit(e.shiftKey && canDraft ? "draft" : "post");
             } else if (e.key === "Escape") {
               e.stopPropagation();
               if (!text.trim()) onCancel();
@@ -142,11 +147,16 @@ export function Composer({ target, file, claude, api, onModeChange, onCancel, on
           <div className="preview comment-body prose prose-stone prose-sm max-w-none dark:prose-invert"
             dangerouslySetInnerHTML={{ __html: preview || '<span class="text-stone-400">Rendering…</span>' }} />
         ))}
-        <div className="mt-2 flex items-center gap-2">
-          <span className="composer-help text-[11px] text-stone-400">{m.help}</span>
+        {/* With two ways to send, the shortcuts get a line of their own. */}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className={`composer-help text-[11px] text-stone-400 ${canDraft ? "w-full" : ""}`}>{canDraft ? `${m.help} · ⌘⇧↵ to add to review` : m.help}</span>
           <span className="flex-1" />
           <button className="btn-ghost" onClick={onCancel}>Cancel</button>
-          <button className="btn-primary" disabled={busy} onClick={submit}>{busy ? m.busy : m.submit}</button>
+          {canDraft && (
+            <button className="btn-secondary" disabled={!!busy} title="Keep it as a draft, posted when you finish your review"
+              onClick={() => submit("draft")}>{busy === "draft" ? "Adding…" : "Add to review"}</button>
+          )}
+          <button className="btn-primary" disabled={!!busy} onClick={() => submit()}>{busy === "post" ? m.busy : m.submit}</button>
         </div>
       </div>
     </>

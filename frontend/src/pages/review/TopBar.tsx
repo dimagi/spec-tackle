@@ -17,6 +17,8 @@ type Props = {
   newCommits: boolean;
   onRefresh: () => void;
   onFinishReview: () => void;
+  /** Drafts waiting to go out with the review. */
+  draftCount?: number;
   tabs?: ReactNode;
   /** Per-PR switches, such as finding references automatically. */
   settings?: ReactNode;
@@ -31,7 +33,7 @@ function syncLabel(sync: SyncStatus) {
   return `Live · ${timeAgo(new Date(sync.lastSync).toISOString())}`;
 }
 
-export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRefresh, onFinishReview, tabs, settings, switcher }: Props) {
+export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRefresh, onFinishReview, draftCount = 0, tabs, settings, switcher }: Props) {
   useTick();
   const label = activity.isDraft && activity.state === "OPEN" ? "DRAFT" : activity.state;
   const dot = sync.fetching ? "bg-amber-400 animate-pulse" : sync.error ? "bg-rose-500" : "bg-emerald-500";
@@ -69,7 +71,7 @@ export function TopBar({ pr, overview, activity, viewer, sync, newCommits, onRef
         <a href={pr.url} target="_blank" rel="noopener" className="hidden rounded-lg px-2.5 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-200/70 sm:block dark:text-stone-300 dark:hover:bg-stone-800">Open on GitHub ↗</a>
         <ThemeSwitch />
         <ViewerBadge viewer={viewer} />
-        <button onClick={onFinishReview} className="rounded-lg bg-stone-900 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-stone-700 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300">Finish review</button>
+        <button onClick={onFinishReview} className="rounded-lg bg-stone-900 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-stone-700 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300">{draftCount ? `Finish review · ${draftCount}` : "Finish review"}</button>
       </div>
     </header>
   );
